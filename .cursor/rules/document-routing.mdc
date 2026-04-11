@@ -1,0 +1,28 @@
+---
+description: Routes the agent to the correct harness and planning documents based on the user's prompt
+alwaysApply: true
+---
+
+# Document Routing
+
+Before starting work, read the documents listed for the matching task type. When a prompt spans multiple categories, load all relevant documents.
+
+## Routing Table
+
+| Task | Read these documents |
+|------|---------------------|
+| **Writing or implementing code** | `harness/coding_principles.md`, `harness/framework_patterns.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
+| **Reviewing code** | `harness/code_review_patterns.md` |
+| **Writing or running tests** | `harness/TEST-STRATEGY.md`, `harness/coding_principles.md` |
+| **Writing or updating the PRD** | `harness/prd_principles.md`, `planning/PRD.md` |
+| **Architecture decisions or design** | `harness/architectural_principles.md`, `planning/architecture.md` |
+| **Writing or updating the implementation plan** | `harness/implementation_plan_principles.md`, `planning/implementiton plan.md` |
+| **Asking the user clarifying questions** | `harness/question_ordering.md` |
+| **Reflecting after completing a task** | `harness/reflection.md` |
+
+## Rules
+
+1. **Read before acting.** Load the listed documents and internalize them before writing any output.
+2. **Question ordering always applies.** Whenever you need to ask the user a question — regardless of task type — also follow `harness/question_ordering.md`.
+3. **Reflection on completion.** After finishing a significant task, follow `harness/reflection.md` to decide whether harness documents need updating.
+4. **Planning docs are context, not templates.** Read planning docs to understand project decisions and constraints. Do not copy code from them verbatim — defer to `harness/coding_principles.md` when they conflict.
