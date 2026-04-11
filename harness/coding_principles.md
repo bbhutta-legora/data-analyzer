@@ -62,6 +62,12 @@ Prefer full words over abbreviations (e.g., `documentCategory` over `docCat`).
 
 ---
 
+## Plan Shared Constants Before Implementation
+
+When the implementation plan shows two modules needing the same knowledge (e.g., `session.py`'s exec namespace and `llm.py`'s system prompt both listing available libraries), create the shared constants module as part of scaffolding — before either consumer is written. Retrofitting a shared constant after one consumer exists costs an extra refactor cycle.
+
+---
+
 ## Small, Focused Changes
 
 Each logical change should be independently testable. Avoid combining unrelated changes—this makes AI-generated code harder to verify and roll back.
