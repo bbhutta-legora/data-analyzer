@@ -64,11 +64,11 @@ Exceptions are fine—just label them as such.
 
 | Belongs in PRD | Belongs in Architecture |
 |----------------|------------------------|
-| "paragraph_id must be stable and deterministic" | "paragraph_id is derived from Word's w14:paraId attribute" |
-| "error handling: handle gracefully" | "retry once with exponential backoff, then include error marker" |
-| "auto-incremented version strings" | "version state file maps content hashes to version numbers" |
+| "code execution must be sandboxed" | "`exec()` with restricted globals, `__import__` removed" |
+| "error handling: retry failed code and explain errors" | "re-prompt LLM with traceback context, max 1 retry" |
+| "session state does not persist after the tab is closed" | "in-memory dict keyed by UUID, cleared on server restart" |
 
-**Test:** If a requirement could be satisfied by multiple implementations, keep it abstract in the PRD and defer the mechanism to ARCHITECTURE.md.
+**Test:** If a requirement could be satisfied by multiple implementations, keep it abstract in the PRD and defer the mechanism to `planning/architecture.md`.
 
 ⸻
 
@@ -132,8 +132,8 @@ Move these to a separate architecture document:
 | Belongs in PRD | Belongs in Architecture |
 |----------------|------------------------|
 | UI wireframes showing layout | Component tree and naming |
-| "User clicks row to expand details" | "CaseRow emits expand event, CaseDetail renders inline" |
-| "Filters by status and classification" | "FilterBar uses dropdown components with v-model binding" |
-| "Save persists to JSON file" | "PUT /api/files/{filename} with full JSON body" |
+| "User clicks a suggested question to ask it" | "SuggestedQuestion chip dispatches sendMessage action in Zustand store" |
+| "Cleaning suggestions show actionable options" | "CleaningPrompt renders buttons that POST to `/api/clean`" |
+| "User can download a notebook of the session" | "GET `/api/export/{session_id}` returns `.ipynb` file" |
 
 **Test:** If removing the detail would change what engineers build *for the user*, it belongs in the PRD. If it only changes *how* they build it, it belongs in architecture.

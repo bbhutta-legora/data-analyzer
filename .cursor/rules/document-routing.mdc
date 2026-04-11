@@ -11,7 +11,7 @@ Before starting work, read the documents listed for the matching task type. When
 
 | Task | Read these documents |
 |------|---------------------|
-| **Writing or implementing code** | `harness/coding_principles.md`, `harness/framework_patterns.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
+| **Writing or implementing code** | `harness/coding_principles.md`, `harness/framework_patterns.md`, `harness/code_review_patterns.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
 | **Reviewing code** | `harness/code_review_patterns.md` |
 | **Writing or running tests** | `harness/TEST-STRATEGY.md`, `harness/coding_principles.md` |
 | **Writing or updating the PRD** | `harness/prd_principles.md`, `planning/PRD.md` |
@@ -26,3 +26,5 @@ Before starting work, read the documents listed for the matching task type. When
 2. **Question ordering always applies.** Whenever you need to ask the user a question — regardless of task type — also follow `harness/question_ordering.md`.
 3. **Reflection on completion.** After finishing a significant task, follow `harness/reflection.md` to decide whether harness documents need updating.
 4. **Planning docs are context, not templates.** Read planning docs to understand project decisions and constraints. Do not copy code from them verbatim — defer to `harness/coding_principles.md` when they conflict.
+5. **Process gates are not optional.** When a harness document prescribes human review steps (e.g., TEST-STRATEGY.md Steps 1–2 require user confirmation before writing tests), follow them even when a planning document appears to pre-answer them. Planning documents propose; review steps confirm. Never skip a user confirmation gate because prior artifacts seem to cover it.
+6. **Code review before commit.** After writing or implementing code, once tests pass, analyze all changed files against `harness/code_review_patterns.md` before committing. See the Mandatory Code Review section in `planning/implementiton plan.md` for the full procedure.

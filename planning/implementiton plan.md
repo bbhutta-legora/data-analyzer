@@ -8,6 +8,8 @@
 
 **Default choices:** OpenAI as the initial LLM provider. ~50MB file size upload limit.
 
+**Code review gate:** After any step that produces code, once tests pass, the agent must analyze all changed files against `harness/code_review_patterns.md` before committing. No code enters the codebase without passing this review. See the [Mandatory Code Review](#mandatory-code-review) section below for the full procedure.
+
 ---
 
 ## Summary
@@ -29,6 +31,64 @@
 | 13 | Guided ML frontend | Vertical | Medium | 12, 9 | #5 Guided ML |
 | 14 | Export | Vertical | Medium | 9 | #7 Export |
 | 15 | Help | Vertical | Low | 5 | #9 Help |
+
+---
+
+## Mandatory Code Review
+
+Every step that produces code follows this workflow. The code review gate sits between "tests pass" and "commit." No exceptions.
+
+### Workflow
+
+```
+1. Write tests          → run them → confirm they fail
+2. Write implementation → run tests → confirm they pass
+3. Code review          → analyze all changed files against harness/code_review_patterns.md
+4. Fix violations       → re-run tests → confirm they still pass
+5. Commit
+```
+
+### Code Review Procedure
+
+After tests pass, scan every changed file against the 20 checks in `harness/code_review_patterns.md`. For each violation found, report it in this format:
+
+```
+[Section Name] filename:line — one-sentence description of the problem
+Suggested fix: concrete change to make
+```
+
+Then fix all reported violations before committing. After fixes, re-run the test suite to confirm nothing broke.
+
+### What to Check
+
+Use the quick reference checklist from `harness/code_review_patterns.md`:
+
+| # | Check | What to look for |
+|---|-------|-----------------|
+| 1 | Function size | Can you understand it without scrolling? |
+| 2 | Nesting depth | More than 2 levels of indentation? |
+| 3 | Naming | Would a grep for this name find only relevant results? |
+| 4 | Error handling | Are exceptions caught specifically? Any bare `except`? |
+| 5 | Return consistency | Does every return path produce the same type? |
+| 6 | Magic values | Any unexplained numbers or strings in logic? |
+| 7 | Comments | Do comments explain *why*, not *what*? |
+| 8 | Mutable defaults | Any `[]`, `{}`, or `set()` as default arguments? |
+| 9 | I/O separation | Can the core logic be unit tested without mocks? |
+| 10 | Prompt construction | Are prompts built from templates with clear sections? |
+| 11 | Test quality | Do tests verify behavior, not implementation? |
+| 12 | Complexity | Is there a simpler way to write this? |
+| 13 | Mutation | Are inputs modified in place? |
+| 14 | Imports | All at the top? Grouped logically? |
+| 15 | API contracts | Inputs validated? Status codes correct? |
+| 16 | Logging | Structured with context? No stray prints? |
+| 17 | Async discipline | Any blocking calls in async functions? |
+| 18 | Hardcoded paths | Any machine-specific or absolute paths? |
+| 19 | Duplication | Same fact expressed in multiple places? |
+| 20 | Dead code | Commented-out code, unused imports, unreachable branches? |
+
+### Scaffolding Exception
+
+Steps that only create configuration or scaffolding (e.g., Step 1, Step 5) still go through the review, but checks like test quality (11) and prompt construction (10) can be skipped when there are no tests or prompts in scope.
 
 ---
 

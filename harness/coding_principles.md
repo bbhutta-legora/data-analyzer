@@ -12,6 +12,10 @@ You do not need to take any code written in a phase planning document literally,
 
 Before writing code, first write a test for it. Write unit, integration, and functional tests as appropriate for the change.
 
+**Follow the full TEST-STRATEGY.md process.** The test strategy prescribes human review gates (Steps 1–2) before any test code is written (Step 4). These gates cannot be skipped, even when an implementation plan or other planning document already contains test code. A planning document proposes tests at design time; the review steps confirm the user's intent at execution time. The user may have changed their mind, spotted new edge cases, or want to remove tests since the plan was written.
+
+Concretely: present behaviors in plain English (Step 1) and specific test cases with expected failures (Step 2) to the user, and wait for confirmation before writing test files.
+
 ---
 
 ## Verification Guidance
@@ -111,13 +115,13 @@ if success:
 
 ## State Transitions
 
-For entities with status fields (Matter, Issue), document the valid state transitions and what triggers them. This prevents invalid state changes.
+For entities with status fields (e.g., session state, cleaning suggestion status), document the valid state transitions and what triggers them. This prevents invalid state changes.
 
 ---
 
 ## AI Logic Isolation
 
-Keep all Claude API prompts in dedicated files within `/lib/services/` or as constants at the top of the file where they're used. Never inline prompts deep in business logic.
+Keep all LLM prompts in `backend/llm.py` or as constants at the top of the file where they're used. Never inline prompts deep in business logic.
 
 Document the expected input/output format for each AI call with example payloads in comments.
 
@@ -133,11 +137,11 @@ When generating complex logic, include "review anchor" comments that flag areas 
 
 ---
 
-## Database Query Patterns
+## Session State Access Patterns
 
-All database queries go through `/lib/db/`. No raw Prisma calls in route handlers or components.
+All session state access goes through `backend/session.py`. No direct dictionary manipulation of the session store in route handlers.
 
-Include the purpose of each query as a comment (e.g., `// Fetch all unresolved issues for cascade calculation`).
+Include the purpose of each state access as a comment (e.g., `# Retrieve the working dataframe for the current session`).
 
 ---
 
@@ -255,67 +259,11 @@ Process pool tests may fail in sandboxed or restricted environments (e.g., pytes
 
 ---
 
-## Legacy Notebook Notes (if editing ipynb)
+## Exported Notebook Quality
 
-When working with Jupyter notebooks, additional care is needed around cell execution order and variable scope.
+This project exports Jupyter notebooks (`exporter.py`). Ensure exported notebooks are self-contained:
 
-### Avoid Redefining Constants Across Cells
-
-When a constant is used by functions or data structures defined in earlier cells, do **not** redefine it in later cells. The earlier cell's dictionary/function may still reference the old value.
-
-**Bad pattern:**
-```python
-# Cell 10 (Milestone 2)
-FRAMEWORK = "short version"
-FRAMEWORKS = {"key": FRAMEWORK}  # Dict holds reference to old string
-def get_framework(): return FRAMEWORKS["key"]
-
-# Cell 20 (Milestone 3)  
-FRAMEWORK = "long version"  # ❌ FRAMEWORKS still points to old string!
-```
-
-**Good pattern — define constants BEFORE functions that use them:**
-```python
-# Cell 10 (Milestone 3) - Define constants first
-FRAMEWORK = "long version"
-
-# Cell 15 (Milestone 2) - Then define data structures and functions
-FRAMEWORKS = {"key": FRAMEWORK}
-def get_framework(): return FRAMEWORKS["key"]
-```
-
-**Alternative — rebuild the dict after redefining constants:**
-```python
-# Cell 20 (Milestone 3)
-FRAMEWORK = "long version"
-FRAMEWORKS = {"key": FRAMEWORK}  # Rebuild dict with new reference
-```
-
-### Document Cell Dependencies
-
-When a cell depends on variables from specific earlier cells, add a comment:
-```python
-"""
-Dependencies: 
-- Cell 22: get_framework() function
-- Cells 28-32: Framework constants (RISK_FACTORS_FRAMEWORK, etc.)
-"""
-```
-
-### Test in Fresh Kernel State
-
-After structural refactoring of notebook cells:
-1. Restart the kernel (clearing all state)
-2. Run all cells sequentially from top to bottom
-3. Verify outputs match expectations
-
-This catches hidden state dependencies where a variable was set in a previous run but wouldn't exist in a fresh execution.
-
-### Prefer Single-Source-of-Truth for Constants
-
-Rather than defining a constant in one milestone and "enhancing" it in another, define each constant in exactly one place. If the constant needs to be updated, update the original cell.
-
-This avoids:
-- Confusion about which definition is authoritative
-- Stale references in dicts/closures
-- Execution-order bugs
+- All necessary imports appear in the first code cell
+- The dataframe loading cell uses a placeholder path that the user can replace
+- Code cells and markdown explanation cells alternate in the order they were generated
+- The exported notebook runs top-to-bottom in a fresh kernel without errors

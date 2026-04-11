@@ -29,19 +29,19 @@ Ask yourself:
 ### Step 2: Generalize the Insight
 
 Convert the specific experience into a general principle:
-- **Specific:** "Classification failed when the LLM returned a tag not defined in the taxonomy config"
-- **General:** "Always validate LLM outputs against the configured schema before using them downstream"
+- **Specific:** "LLM response parsing broke when the model wrapped JSON in code fences with trailing prose"
+- **General:** "Always strip code fences before parsing LLM JSON responses, and don't anchor the regex to end-of-string"
 
 ### Step 3: Determine Where to Document
 
 | Type of Learning | Where to Add |
 |-----------------|--------------|
-| Coding patterns, anti-patterns, style | `agent_instructions/coding_principles.md` |
-| Architecture decisions, module boundaries | `planning/ARCHITECTURE.md` |
+| Coding patterns, anti-patterns, style | `harness/coding_principles.md` |
+| Framework-specific gotchas (FastAPI, LLM, asyncio) | `harness/framework_patterns.md` |
+| Architecture decisions, module boundaries | `planning/architecture.md` |
 | Product requirements, scope decisions | `planning/PRD.md` |
-| Implementation details, configuration | `planning/other_context.md` |
-| Task sequencing, milestone dependencies | `planning/implementation_plan.md` |
-| Meta-guidance for AI behavior | `agent_instructions/` (existing or new file) |
+| Task sequencing, milestone dependencies | `planning/implementiton plan.md` |
+| Meta-guidance for AI behavior | `harness/` (existing or new file) |
 
 ### Step 4: Propose the Update
 
@@ -67,15 +67,15 @@ Or proactively suggest:
 
 ## Example Reflection
 
-**Situation:** Classification failed silently when the LLM returned tags not in the taxonomy, and the error wasn't surfaced until downstream validation.
+**Situation:** LLM response parsing broke silently when the model returned JSON wrapped in code fences with trailing prose after the closing fence.
 
-**Learning:** LLM outputs should be validated against the configured taxonomy immediately after parsing, with clear errors logged for debugging.
+**Learning:** LLM JSON responses must be stripped of code fences before parsing, and the regex must not anchor to end-of-string since the model appends trailing content non-deterministically.
 
-**Generalization:** Always validate external/untrusted output against known contracts before propagating through the system.
+**Generalization:** Always validate and sanitize external/untrusted output against known contracts before propagating through the system.
 
 **Documentation updates:**
-1. Added "LLM Output Validation" section to `coding_principles.md`
-2. Updated `ARCHITECTURE.md` to note that classification results are validated against taxonomy labels
+1. Added "Handling JSON Responses" section to `harness/framework_patterns.md`
+2. Updated `planning/architecture.md` to note the LLM response parsing contract
 
 ---
 
@@ -90,7 +90,7 @@ Or proactively suggest:
 
 ## Anti-Patterns to Avoid
 
-❌ **Over-documenting** — Don't add guidance for one-off issues unlikely to recur
-❌ **Vague principles** — "Be careful with notebooks" is less useful than specific patterns
-❌ **Duplicating content** — Check if guidance already exists before adding
-❌ **Skipping reflection** — The value compounds over time; don't skip it to save time
+- **Over-documenting** — Don't add guidance for one-off issues unlikely to recur
+- **Vague principles** — "Be careful with LLM output" is less useful than specific patterns
+- **Duplicating content** — Check if guidance already exists before adding
+- **Skipping reflection** — The value compounds over time; don't skip it to save time

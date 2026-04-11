@@ -44,6 +44,7 @@ Each step should include:
 | **Tests FIRST** | Test code with docstrings linking to requirements |
 | **Then Implementation** | Implementation code with verbose comments |
 | **Verification** | Concrete commands with expected output |
+| **Code Review** | Analyze all changed files against `harness/code_review_patterns.md` — fix violations before committing |
 
 ---
 
@@ -55,8 +56,11 @@ Per `coding_principles.md`, every step that produces code should:
 2. Run tests to verify they fail
 3. Write implementation
 4. Run tests to verify they pass
+5. Run code review against `harness/code_review_patterns.md` on all changed files
+6. Fix any violations found, then re-run tests to confirm they still pass
+7. Commit only after the review passes
 
-The plan itself should model this by showing test code **before** implementation code.
+The plan itself should model this by showing test code **before** implementation code. No code is committed without passing the code review gate.
 
 ---
 

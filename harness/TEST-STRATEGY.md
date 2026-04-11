@@ -1,4 +1,4 @@
-# Orbit — Test Strategy
+# Smart Dataset Explainer — Test Strategy
 
 How we write and run tests in this project. This document is prescriptive — follow this process for every new test.
 
@@ -152,30 +152,39 @@ The test is broken in a way that makes it always fail — even if the implementa
 
 ### High priority — test these first
 
-1. **Parsers** (`parseTasks`, `parseContext`) — pure functions, easy to test, high value. If parsing breaks, everything downstream breaks.
-2. **State mutations** — marking done, switching focus, moving to waiting. These are the core user actions. After the refactor (Decision 1), these write to markdown — correctness matters.
-3. **LLM response parsing** — `parseLLMJson`, `parseActions`. These handle unpredictable AI output — the exact place where robustness matters most.
-4. **Prompt builders** — given these tasks/projects/people, does the prompt contain the right context? Does it include the current mode (Decision 3)?
+1. **LLM response parsing** (`llm.py`) — parsing structured JSON from non-deterministic LLM output is the most fragile boundary. Test code-fence stripping, missing fields, malformed JSON, and edge cases like trailing prose.
+2. **Sandboxed code execution** (`executor.py`) — test that LLM-generated code runs correctly, figures are captured as base64, restricted imports are blocked, and timeouts fire.
+3. **Session lifecycle** (`session.py`) — session creation, dataframe storage, conversation history management, and cleanup.
+4. **Prompt construction** (`llm.py`) — given a dataframe's metadata and conversation history, does the prompt include the right context?
 
 ### Medium priority
 
-5. **API route contracts** — mock the filesystem and AI client, verify each route returns the right shape for valid input and a meaningful error for invalid input.
-6. **Command action dispatch** — verify each action type triggers the right state change (Decision 8).
+5. **API route contracts** (`main.py`) — mock the LLM and executor, verify each endpoint returns the right shape for valid input and a meaningful error for invalid input (correct HTTP status codes, Pydantic-validated responses).
+6. **Notebook export** (`exporter.py`) — verify the exported `.ipynb` is valid JSON, contains the expected cells, and is runnable.
 
 ### Low priority — defer these
 
-7. **Component rendering** — only test if a component has complex conditional logic. Don't test that a button renders.
-8. **SWR polling behavior** — this is library code. Trust it.
+7. **Frontend component rendering** — only test if a component has complex conditional logic. Don't test that a button renders.
+8. **Zustand store behavior** — test only if store logic goes beyond simple set/get.
 
 ---
 
 ## Infrastructure
 
-- **Test runner:** Vitest (fast, native TypeScript/ESM support, compatible with Next.js).
-- **Test location:** `__tests__/` directory at project root, mirroring the source structure. E.g. `__tests__/lib/parsers/parse-tasks.test.ts`.
+### Backend (Python)
+
+- **Test runner:** pytest
+- **Test location:** `backend/tests/`, mirroring the source module names. E.g. `backend/tests/test_session.py`.
 - **Running tests:**
-  - All tests: `pnpm test`
-  - Specific file: `pnpm test __tests__/lib/parsers/parse-tasks.test.ts`
-  - Watch mode: `pnpm test --watch`
-- **Mocking:** Vitest built-in `vi.mock()` for filesystem and API mocks. No additional mocking libraries needed.
-- **CI:** Run `pnpm test` alongside `pnpm lint` and `tsc --noEmit` on every push (once CI is set up).
+  - All tests: `pytest backend/tests/ -v`
+  - Specific file: `pytest backend/tests/test_session.py -v`
+- **Mocking:** `unittest.mock` (`patch`, `MagicMock`) for LLM API calls and file I/O.
+
+### Frontend (TypeScript)
+
+- **Test runner:** Vitest
+- **Test location:** `frontend/tests/` or co-located `*.test.tsx` files.
+- **Running tests:**
+  - All tests: `npm test` (from `frontend/`)
+  - Watch mode: `npm test -- --watch`
+- **Mocking:** Vitest built-in `vi.mock()` for API client mocks.
