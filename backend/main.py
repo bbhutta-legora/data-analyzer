@@ -126,6 +126,10 @@ def build_dataset_metadata(dataframes: dict[str, pd.DataFrame]) -> dict[str, dic
 
 # ── Key validation helpers ────────────────────────────────────────────────────
 
+class KeyValidationError(Exception):
+    """Raised when key validation fails due to a non-auth issue (e.g. network)."""
+
+
 def validate_openai_key(api_key: str) -> bool:
     """
     Check whether api_key is a working OpenAI key by listing available models.
@@ -135,17 +139,16 @@ def validate_openai_key(api_key: str) -> bool:
 
     Failure modes:
     - openai.AuthenticationError → returns False (invalid key)
-    - Any other exception (network, timeout) → propagates to caller;
-      the route handler catches it and returns 500.
+    - Network / connection errors → raises KeyValidationError
     """
-    # Imported here rather than at module level so only the provider the user
-    # selects pays the SDK import cost — both SDKs are large and slow to import.
     import openai
     try:
         openai.OpenAI(api_key=api_key, max_retries=0).models.list()
         return True
     except openai.AuthenticationError:
         return False
+    except openai.APIConnectionError as exc:
+        raise KeyValidationError(f"Could not reach OpenAI API: {exc}") from exc
 
 
 def validate_anthropic_key(api_key: str) -> bool:
@@ -157,11 +160,8 @@ def validate_anthropic_key(api_key: str) -> bool:
 
     Failure modes:
     - anthropic.AuthenticationError → returns False (invalid key)
-    - Any other exception (network, timeout) → propagates to caller;
-      the route handler catches it and returns 500.
+    - Network / connection errors → raises KeyValidationError
     """
-    # Imported here rather than at module level so only the provider the user
-    # selects pays the SDK import cost — both SDKs are large and slow to import.
     import anthropic
     try:
         anthropic.Anthropic(api_key=api_key, max_retries=0).messages.create(
@@ -172,6 +172,8 @@ def validate_anthropic_key(api_key: str) -> bool:
         return True
     except anthropic.AuthenticationError:
         return False
+    except anthropic.APIConnectionError as exc:
+        raise KeyValidationError(f"Could not reach Anthropic API: {exc}") from exc
 
 
 # ── Request / response models ─────────────────────────────────────────────────
@@ -235,11 +237,34 @@ def validate_key(body: ValidateKeyRequest) -> JSONResponse:
             },
         )
 
-    is_valid = (
-        validate_openai_key(api_key)
-        if body.provider == "openai"
-        else validate_anthropic_key(api_key)
-    )
+    if not api_key.isascii():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_api_key",
+                "detail": (
+                    "API key contains non-ASCII characters. "
+                    "Check that you pasted the correct key — it should start with "
+                    "'sk-' and contain only letters, numbers, and hyphens."
+                ),
+            },
+        )
+
+    try:
+        is_valid = (
+            validate_openai_key(api_key)
+            if body.provider == "openai"
+            else validate_anthropic_key(api_key)
+        )
+    except KeyValidationError as exc:
+        logger.error("Key validation connection error: %s", exc)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": "connection_error",
+                "detail": str(exc),
+            },
+        )
 
     if not is_valid:
         return JSONResponse(
