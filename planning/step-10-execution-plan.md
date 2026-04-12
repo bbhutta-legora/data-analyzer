@@ -2,7 +2,7 @@
 
 ## What we're building
 
-Step 10 adds interactive data cleaning with confirm-before-apply suggestions (PRD #4). Cleaning suggestions appear after upload (in DataSummary) and during chat Q&A (in assistant messages). Each suggestion has option buttons (e.g., "Drop rows" / "Fill with median"). Clicking an option calls a new `/api/clean` POST endpoint that applies the action to the session's working DataFrame, returns updated dataset stats, and optionally generates follow-up cleaning suggestions via the LLM. No changes are applied without user confirmation (the button click IS the confirmation).
+Step 10 adds interactive data cleaning with confirm-before-apply suggestions (PRD #4). Cleaning suggestions appear after upload (in DataSummary) and during chat Q&A (in assistant messages). Each suggestion has option buttons (e.g., "Drop rows" / "Fill with median"). Clicking an option calls a new `/api/clean` POST endpoint that applies the action to the session's working DataFrame and returns updated dataset stats. No LLM follow-up call — the user can ask about data quality in the chat if they want more suggestions.
 
 ## Current state
 
@@ -75,8 +75,8 @@ Relevant code already in place:
 
 1. **Extract `CleaningSuggestionCard` to shared component** — Currently lives inside `DataSummary.tsx` but needs reuse in `MessageBubble.tsx`. Move to `frontend/src/components/CleaningSuggestionCard.tsx`.
 2. **Pure cleaning logic in `clean.py`** — Separates I/O (route handler) from logic (DataFrame mutations) per coding principles.
-3. **JSON response, not SSE** — Cleaning is a synchronous, fast operation (drop rows, fill values). No streaming needed. The optional LLM call for follow-up suggestions can be included in the same response or skipped for v1.
-4. **`dataset_name` parameter** — Required to disambiguate which DataFrame to clean in multi-file sessions.
+3. **JSON response, not SSE** — Cleaning is a synchronous, fast operation (drop rows, fill values). No streaming needed. No LLM follow-up call — return updated stats only.
+4. **`dataset_name` parameter** — Added to `CleaningSuggestion` type so the LLM specifies which DataFrame a suggestion refers to. Required in the `/api/clean` request body.
 
 ## Deviations from the implementation plan
 
@@ -90,21 +90,12 @@ Relevant code already in place:
 
 5. **Follow-up LLM call complexity**: The plan says "optionally calls the LLM to check for follow-up cleaning suggestions." This adds latency and requires API key availability. Recommend making this optional (skip in v1, or make it a separate subsequent call) to keep the cleaning action fast and testable without LLM mocking.
 
-## Decisions needing user input
+## Resolved decisions
 
-1. **Multi-DataFrame targeting**: When a cleaning suggestion says "Column age has 10% missing," how does the frontend know which DataFrame it refers to? Options:
-   - **(a)** Add a `dataset_name` field to the `CleaningSuggestion` type (requires LLM prompt update + backend/frontend type changes).
-   - **(b)** Default to the first/only DataFrame, require explicit selection only for multi-file uploads.
-   - **(c)** Infer from column name (fragile if multiple DataFrames share column names).
+1. **Multi-DataFrame targeting** — Add `dataset_name` field to `CleaningSuggestion` type. The LLM prompt will be updated to include the dataset name in each suggestion. Frontend passes it through to `/api/clean`.
 
-2. **Is the option button click the confirmation?** The plan says "confirm-before-apply." Options:
-   - **(a)** Clicking the option button directly applies the action (one-click = confirm). Simplest UX.
-   - **(b)** Clicking the option shows a confirmation dialog before applying. Safer but more friction.
-   - **(c)** Clicking the option shows a preview of what will change, then a "Confirm" button applies it.
+2. **One-click confirmation** — Clicking the option button directly applies the action. No separate confirmation dialog.
 
-3. **Follow-up suggestions after cleaning**: Should the `/api/clean` response include LLM-generated follow-up suggestions?
-   - **(a)** Yes, always call the LLM after cleaning to check for new issues. Adds ~2-5s latency per action.
-   - **(b)** No LLM call — return only updated stats. Follow-up suggestions come from the next chat interaction.
-   - **(c)** Return stats immediately, then fire an async LLM call whose results appear as a new message in chat.
+3. **No LLM follow-up** — `/api/clean` returns updated stats only. No LLM call for follow-up suggestions. The user can ask about data quality in the chat.
 
-4. **Undo/reset support**: The session stores `dataframes_original`. Should Step 10 include a "Reset to original" button, or defer that to a later step?
+4. **Include undo/reset** — Add a "Reset to original" button since the `dataframes_original` infrastructure already exists in `session.py`.
