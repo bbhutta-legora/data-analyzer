@@ -250,6 +250,99 @@ export async function resetDatasets(
   });
 }
 
+// ── Step 13: ML Wizard SSE Client ─────────────────────────────────────────
+
+export interface MlStepCallbacks {
+  onExplanation: (text: string) => void;
+  onResult: (result: { stdout: string; figures: string[] }) => void;
+  onMlState: (state: Record<string, unknown>) => void;
+  onError: (message: string) => void;
+  onDone: () => void;
+}
+
+/**
+ * Send one ML wizard stage request and process the SSE response stream.
+ *
+ * Mirrors sendChatMessage — POST + ReadableStream instead of EventSource
+ * because the endpoint is a POST. Dispatches callbacks as SSE events arrive.
+ * Always calls onDone at the end so the caller can clear streaming state.
+ *
+ * PRD ref: #5 (Guided ML)
+ */
+export async function sendMlStep(
+  sessionId: string,
+  stage: string,
+  userInput: string,
+  callbacks: MlStepCallbacks,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/ml-step`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, stage, user_input: userInput }),
+    });
+  } catch {
+    callbacks.onError("Network error: could not reach the server.");
+    callbacks.onDone();
+    return;
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({
+      detail: response.statusText,
+    }));
+    callbacks.onError(body.detail || `Request failed with status ${response.status}`);
+    callbacks.onDone();
+    return;
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop()!;
+
+    for (const part of parts) {
+      if (!part.trim()) continue;
+
+      let eventType = "";
+      let data = "";
+      for (const line of part.split("\n")) {
+        if (line.startsWith("event: ")) eventType = line.slice(7);
+        else if (line.startsWith("data: ")) data = line.slice(6);
+      }
+
+      switch (eventType) {
+        case "explanation":
+          callbacks.onExplanation(data);
+          break;
+        case "result":
+          callbacks.onResult(JSON.parse(data));
+          break;
+        case "ml_state":
+          callbacks.onMlState(JSON.parse(data));
+          break;
+        case "error":
+          callbacks.onError(data);
+          break;
+        case "done":
+          callbacks.onDone();
+          return;
+      }
+    }
+  }
+
+  callbacks.onDone();
+}
+
 // ── Step 9: Chat SSE Client ────────────────────────────────────────────────
 
 export interface ChatCallbacks {

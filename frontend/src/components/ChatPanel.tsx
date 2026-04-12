@@ -11,6 +11,7 @@ import { useStore } from "../store";
 import { sendChatMessage, exportNotebook, resetDatasets } from "../api";
 import { DataSummary } from "./DataSummary";
 import { MessageBubble } from "./MessageBubble";
+import { MLWizard } from "./MLWizard";
 
 function ResetButton() {
   const sessionId = useStore((s) => s.sessionId);
@@ -70,6 +71,15 @@ export function ChatPanel() {
   const isStreaming = useStore((s) => s.isStreaming);
   const sessionId = useStore((s) => s.sessionId);
   const hasAppliedCleaning = useStore((s) => s.hasAppliedCleaning);
+  const mlWizardActive = useStore((s) => s.mlWizardActive);
+  const startMlWizard = useStore((s) => s.startMlWizard);
+  const resetMlWizard = useStore((s) => s.resetMlWizard);
+  const datasetInfo = useStore((s) => s.datasetInfo);
+
+  // All column names from all loaded datasets, used to populate wizard options.
+  const allColumns = datasetInfo
+    ? Object.values(datasetInfo.datasets).flatMap((d) => d.columns)
+    : [];
 
   const [inputValue, setInputValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -82,9 +92,11 @@ export function ChatPanel() {
     }
   }, [messages]);
 
+  const isChatDisabled = isStreaming || mlWizardActive;
+
   function handleSend() {
     const trimmed = inputValue.trim();
-    if (!trimmed || isStreaming || !sessionId) return;
+    if (!trimmed || isChatDisabled || !sessionId) return;
 
     sendQuestion(trimmed);
     setInputValue("");
@@ -116,6 +128,28 @@ export function ChatPanel() {
         }}
       >
         {hasAppliedCleaning && <ResetButton />}
+        <button
+          type="button"
+          onClick={startMlWizard}
+          disabled={mlWizardActive || isStreaming || !sessionId}
+          aria-label="Build a Model"
+          style={{
+            padding: "6px 14px",
+            fontSize: 13,
+            fontWeight: 500,
+            background:
+              mlWizardActive || isStreaming || !sessionId ? "#d1d5db" : "#6d28d9",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            cursor:
+              mlWizardActive || isStreaming || !sessionId
+                ? "not-allowed"
+                : "pointer",
+          }}
+        >
+          Build a Model
+        </button>
         <button
           type="button"
           onClick={handleExport}
@@ -152,6 +186,14 @@ export function ChatPanel() {
           {messages.map((msg, idx) => (
             <MessageBubble key={idx} message={msg} />
           ))}
+
+          {mlWizardActive && sessionId && (
+            <MLWizard
+              columns={allColumns}
+              sessionId={sessionId}
+              onExit={resetMlWizard}
+            />
+          )}
         </div>
       </div>
 
@@ -175,14 +217,14 @@ export function ChatPanel() {
               }
             }}
             placeholder="Ask a question about your data..."
-            disabled={isStreaming}
+            disabled={isChatDisabled}
             style={{
               flex: 1,
               padding: "12px 16px",
               fontSize: 14,
               border: "1px solid #d1d5db",
               borderRadius: 8,
-              background: isStreaming ? "#f9fafb" : "#fff",
+              background: isChatDisabled ? "#f9fafb" : "#fff",
               color: "#1f2937",
               outline: "none",
             }}
@@ -190,13 +232,13 @@ export function ChatPanel() {
           <button
             type="button"
             onClick={handleSend}
-            disabled={isStreaming || !inputValue.trim()}
+            disabled={isChatDisabled || !inputValue.trim()}
             aria-label="Send"
             style={{
               padding: "12px 20px",
               fontSize: 14,
               fontWeight: 500,
-              background: isStreaming || !inputValue.trim() ? "#d1d5db" : "#1a73e8",
+              background: isChatDisabled || !inputValue.trim() ? "#d1d5db" : "#1a73e8",
               color: "#fff",
               border: "none",
               borderRadius: 8,
