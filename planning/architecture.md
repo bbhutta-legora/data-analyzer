@@ -81,10 +81,11 @@ Sessions are created on file upload and discarded on explicit close or server re
 
 **File upload (REST):**
 1. Frontend POSTs file (CSV/Excel)
-2. `main.py` parses file into a pandas DataFrame (with sheet selection for Excel)
-3. `session.py` creates a new session, stores the dataframe
-4. `llm.py` generates the initial summary, suggested questions, and initial cleaning suggestions
-5. Response returned as JSON
+2. `main.py` validates extension, size, and non-emptiness — returns structured `{"error": "<type>", "detail": "<message>"}` on failure (400/413)
+3. `main.py` parses file into `dict[str, pd.DataFrame]` — one entry per CSV stem, one entry per Excel sheet
+4. `session.py` creates a new session storing all DataFrames
+5. `llm.py` generates the initial summary, suggested questions, and initial cleaning suggestions (Step 7)
+6. Response returned as JSON with `session_id` and `datasets` metadata per DataFrame
 
 **Data cleaning confirmation (REST):**
 1. Frontend POSTs the user's cleaning decision (e.g., "drop duplicates")
