@@ -149,6 +149,62 @@ export async function uploadFile(
   return response.json() as Promise<UploadResponse>;
 }
 
+// ── Step 10: Data Cleaning ────────────────────────────────────────────────
+
+export interface CleanResponse {
+  row_count: number;
+  column_count: number;
+  columns: string[];
+  dtypes: Record<string, string>;
+  missing_values: Record<string, number>;
+  message: string;
+}
+
+export interface ResetResponse {
+  datasets: Record<string, DatasetMetadata>;
+}
+
+/**
+ * Apply a cleaning action to a dataset in the session.
+ *
+ * Returns updated metadata for the cleaned dataset. The backend applies the
+ * action to the working copy and preserves the original for reset.
+ *
+ * PRD ref: #4 (Data Cleaning)
+ */
+export async function applyCleaningAction(
+  sessionId: string,
+  action: string,
+  column?: string,
+  datasetName?: string,
+): Promise<CleanResponse> {
+  return apiFetch<CleanResponse>("/api/clean", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      action,
+      column: column ?? null,
+      dataset_name: datasetName ?? null,
+    }),
+  });
+}
+
+/**
+ * Reset all datasets in a session to their original upload-time state.
+ *
+ * Returns updated metadata for all datasets after reset.
+ *
+ * PRD ref: #4 (Data Cleaning) — undo/reset
+ */
+export async function resetDatasets(
+  sessionId: string,
+): Promise<ResetResponse> {
+  return apiFetch<ResetResponse>("/api/clean/reset", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
 // ── Step 9: Chat SSE Client ────────────────────────────────────────────────
 
 export interface ChatCallbacks {

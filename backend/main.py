@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from clean import VALID_ACTIONS, apply_cleaning_action
 from executor import execute_code
 from llm import (
     build_chat_messages,
@@ -184,6 +185,17 @@ class ValidateKeyRequest(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     question: str
+
+
+class CleanRequest(BaseModel):
+    session_id: str
+    action: str
+    column: str | None = None
+    dataset_name: str | None = None
+
+
+class ResetRequest(BaseModel):
+    session_id: str
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -467,3 +479,138 @@ def chat(request: ChatRequest):
 def _sse_event(event_type: str, data: str) -> str:
     """Format a single SSE event string with the standard event + data fields."""
     return "event: " + event_type + "\ndata: " + data + "\n\n"
+
+
+# ── Clean endpoint (Step 10) ────────────────────────────────────────────────
+
+
+def _resolve_dataset_name(session_dataframes: dict, dataset_name: str | None) -> str:
+    """
+    Resolve which DataFrame to target for a cleaning action.
+
+    If dataset_name is provided and exists in the session, use it.
+    If dataset_name is None, default to the first DataFrame in the session.
+    Raises KeyError if the requested name doesn't exist.
+    """
+    if dataset_name is not None:
+        if dataset_name not in session_dataframes:
+            raise KeyError(
+                "Dataset '" + dataset_name + "' not found. "
+                "Available datasets: " + ", ".join(session_dataframes.keys())
+            )
+        return dataset_name
+    return next(iter(session_dataframes))
+
+
+@app.post("/api/clean")
+def clean(request: CleanRequest) -> JSONResponse:
+    """
+    Apply a cleaning action to a session's DataFrame and return updated metadata.
+
+    Validates the session, action, and target dataset, then delegates to the
+    pure cleaning functions in clean.py. The working DataFrame is replaced
+    in-place in the session; the original DataFrame is preserved for reset.
+
+    Returns JSON with updated metadata: row_count, column_count, columns,
+    dtypes, missing_values, and a human-readable message.
+
+    PRD ref: #4 (Data Cleaning)
+    Tests: backend/tests/test_clean.py
+    """
+    session = session_store.get(request.session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "session_not_found",
+                "detail": "Session not found or has expired.",
+            },
+        )
+
+    if request.action not in VALID_ACTIONS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_action",
+                "detail": (
+                    "Unknown cleaning action: '" + request.action + "'. "
+                    "Valid actions: " + ", ".join(sorted(VALID_ACTIONS))
+                ),
+            },
+        )
+
+    try:
+        target_name = _resolve_dataset_name(session.dataframes, request.dataset_name)
+    except KeyError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_dataset_name", "detail": str(exc)},
+        )
+
+    df = session.dataframes[target_name]
+
+    try:
+        cleaned_df = apply_cleaning_action(df, request.action, request.column)
+    except (ValueError, KeyError, TypeError) as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "cleaning_failed", "detail": str(exc)},
+        )
+
+    session.dataframes[target_name] = cleaned_df
+
+    logger.info(
+        "Cleaning applied: session=%s dataset=%s action=%s rows_before=%d rows_after=%d",
+        request.session_id, target_name, request.action, len(df), len(cleaned_df),
+    )
+
+    metadata = build_dataset_metadata({target_name: cleaned_df})[target_name]
+    return JSONResponse(
+        status_code=200,
+        content={
+            **metadata,
+            "message": (
+                "Applied '" + request.action + "' to '" + target_name + "'. "
+                "Rows: " + str(len(df)) + " → " + str(len(cleaned_df)) + "."
+            ),
+        },
+    )
+
+
+@app.post("/api/clean/reset")
+def clean_reset(request: ResetRequest) -> JSONResponse:
+    """
+    Reset all working DataFrames to their original upload-time state.
+
+    Copies from dataframes_original back to dataframes so cleaning actions
+    can be re-applied. Returns updated metadata for all datasets.
+
+    PRD ref: #4 (Data Cleaning) — undo/reset
+    Tests: backend/tests/test_clean.py
+    """
+    session = session_store.get(request.session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "session_not_found",
+                "detail": "Session not found or has expired.",
+            },
+        )
+
+    # Restore working copies from originals. Each is independently copied
+    # so future cleaning actions don't mutate the originals.
+    session.dataframes = {
+        name: df.copy() for name, df in session.dataframes_original.items()
+    }
+
+    # Update the exec namespace so sandboxed code sees the restored DataFrames.
+    session.exec_namespace["dfs"] = session.dataframes
+
+    logger.info("DataFrames reset to original: session=%s", request.session_id)
+
+    datasets = build_dataset_metadata(session.dataframes)
+    return JSONResponse(
+        status_code=200,
+        content={"datasets": datasets},
+    )

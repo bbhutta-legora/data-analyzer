@@ -103,7 +103,8 @@ Respond with a JSON object containing exactly these fields:
   "cleaning_suggestions": [
     {
       "description": "A data quality issue found (e.g., duplicate rows, missing values, type inconsistencies)",
-      "options": ["Option A to fix it", "Option B to fix it"]
+      "options": ["Option A to fix it", "Option B to fix it"],
+      "dataset_name": "name of the dataset this suggestion applies to"
     }
   ],
   "suggested_questions": [
@@ -116,6 +117,8 @@ Rules:
 - cleaning_suggestions may be an empty array if no issues are found.
 - suggested_questions should be specific to THIS dataset (reference actual column names).
 - Each cleaning suggestion must include at least 2 actionable options.
+- Each cleaning suggestion must include a dataset_name matching one of the dataset names above.
+- For options, use one of these exact phrases: "Drop rows", "Fill with median", "Drop duplicates".
 """.strip()
 
 
@@ -158,7 +161,8 @@ Respond with a JSON object containing exactly these fields:
   "cleaning_suggestions": [
     {
       "description": "A data quality issue relevant to this analysis",
-      "options": ["Option A to fix it", "Option B to fix it"]
+      "options": ["Option A to fix it", "Option B to fix it"],
+      "dataset_name": "name of the dataset this suggestion applies to"
     }
   ]
 }
@@ -169,6 +173,8 @@ Rules:
 - Access DataFrames using dfs["<name>"] (e.g., dfs["sales"], dfs["costs"]).
 - cleaning_suggestions may be an empty array if no issues are found.
 - Each cleaning suggestion must include at least 2 actionable options.
+- Each cleaning suggestion must include a dataset_name matching one of the dataset names above.
+- For options, use one of these exact phrases: "Drop rows", "Fill with median", "Drop duplicates".
 - If the question cannot be answered with the available data, explain why in the
   explanation field and provide an empty string for code.
 """.strip()

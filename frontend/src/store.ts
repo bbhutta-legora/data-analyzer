@@ -30,6 +30,7 @@ export interface DatasetMetadata {
 export interface CleaningSuggestion {
   description: string;
   options: string[];
+  dataset_name?: string;
 }
 
 export interface SummaryData {
@@ -76,6 +77,7 @@ interface AppState {
   setScreen: (screen: Screen) => void;
   setSessionId: (id: string) => void;
   setDatasetInfo: (info: DatasetInfo) => void;
+  updateDatasetMetadata: (datasetName: string, metadata: DatasetMetadata) => void;
   addMessage: (message: Message) => void;
   updateLastAssistantMessage: (fields: Partial<Message>) => void;
   setStreaming: (streaming: boolean) => void;
@@ -97,6 +99,20 @@ export const useStore = create<AppState>((set, get) => ({
   setScreen: (screen) => set({ currentScreen: screen }),
   setSessionId: (id) => set({ sessionId: id }),
   setDatasetInfo: (info) => set({ datasetInfo: info }),
+
+  updateDatasetMetadata: (datasetName, metadata) =>
+    set((state) => {
+      if (!state.datasetInfo) return state;
+      return {
+        datasetInfo: {
+          ...state.datasetInfo,
+          datasets: {
+            ...state.datasetInfo.datasets,
+            [datasetName]: metadata,
+          },
+        },
+      };
+    }),
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
