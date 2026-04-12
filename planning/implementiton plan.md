@@ -1601,7 +1601,7 @@ python -m pytest tests/test_ml_workflow.py -v
 
 ---
 
-### Step 13 — Guided ML Frontend
+### Step 13 — Guided ML Frontend ✅ Done
 
 **Goal:** Build the wizard-style UI that walks the user through the ML workflow step by step. Each step presents options or information and waits for user input before proceeding.
 

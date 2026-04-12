@@ -140,8 +140,9 @@ Key functions (Step 12 — Guided ML):
 2. `exporter.py` builds `.ipynb` from session's code history
 3. File returned as a download response
 
-**Guided ML step (SSE — Step 12):**
-1. Frontend POSTs `{session_id, stage, user_input}` to `/api/ml-step`
+**Guided ML step (SSE — Steps 12 + 13):**
+1. User clicks "Build a Model" in ChatPanel header → sets `mlWizardActive: true` in Zustand store. `MLWizard` component renders inline in the chat stream. Chat input and "Build a Model" button are disabled while the wizard is active.
+2. Frontend POSTs `{session_id, stage, user_input}` to `/api/ml-step` via `sendMlStep()` in `api.ts`
 2. `main.py` validates stage progression against `ML_STAGES` order (first stage must be `"target"`; can advance one step or restart to any earlier/same stage; cannot skip ahead)
 3. On restart to an earlier stage, all session ML state for subsequent stages is reset
 4. `main.py` routes to the stage-specific prompt builder in `llm.py` (6 builders, one per stage)
@@ -170,6 +171,7 @@ frontend/
 │   │   ├── MessageBubble.tsx # Single message (explanation, code toggle, charts)
 │   │   ├── DataSummary.tsx   # Initial summary display
 │   │   ├── CleaningSuggestionCard.tsx # Single cleaning suggestion card (shared by DataSummary + MessageBubble)
+│   │   ├── MLWizard.tsx      # Inline ML wizard (target → features → training → results)
 │   │   └── HelpModal.tsx     # Help overlay
 │   └── main.tsx
 ├── package.json
@@ -191,6 +193,7 @@ interface AppState {
   datasetInfo: DatasetInfo | null
   currentScreen: 'setup' | 'upload' | 'chat'
   hasAppliedCleaning: boolean  // true after any cleaning action; controls reset button visibility
+  mlWizardActive: boolean      // true while the ML wizard is open; disables chat input
 }
 ```
 
