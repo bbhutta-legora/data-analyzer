@@ -9,14 +9,14 @@
 import { useStore } from "./store";
 import { ApiKeyInput } from "./components/ApiKeyInput";
 import { FileUpload } from "./components/FileUpload";
-import { DataSummary } from "./components/DataSummary";
+import { ChatPanel } from "./components/ChatPanel";
 import HelpModal from "./components/HelpModal";
 
 function CurrentScreen() {
   const currentScreen = useStore((state) => state.currentScreen);
 
   if (currentScreen === "upload") return <FileUpload />;
-  if (currentScreen === "chat") return <DataSummary />;
+  if (currentScreen === "chat") return <ChatPanel />;
   return <ApiKeyInput />;
 }
 

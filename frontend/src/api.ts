@@ -6,11 +6,11 @@
 // Endpoint-specific functions are added per step:
 //   Step 6:  validateApiKey()          ← implemented here
 //   Step 7:  uploadFile()
-//   Step 8:  streamChatQuestion() (SSE)
+//   Step 9:  sendChatMessage() (SSE)
 //   Step 10: applyCleaningAction()
 //   Step 14: exportNotebook()
 
-import type { Provider, DatasetMetadata, SummaryData } from "./store";
+import type { Provider, DatasetMetadata, SummaryData, CleaningSuggestion } from "./store";
 
 // API_BASE is empty — requests go to /api/* which Vite proxies to the backend.
 // This avoids hardcoding the backend port in application code.
@@ -147,4 +147,105 @@ export async function uploadFile(
   }
 
   return response.json() as Promise<UploadResponse>;
+}
+
+// ── Step 9: Chat SSE Client ────────────────────────────────────────────────
+
+export interface ChatCallbacks {
+  onExplanation: (text: string) => void;
+  onResult: (result: { stdout: string; figures: string[] }) => void;
+  onCleaningSuggestions: (suggestions: CleaningSuggestion[]) => void;
+  onError: (message: string) => void;
+  onDone: () => void;
+}
+
+/**
+ * Send a chat question to the backend and process the SSE response stream.
+ *
+ * Uses fetch + ReadableStream instead of EventSource because /api/chat is
+ * a POST endpoint and EventSource only supports GET.
+ *
+ * Dispatches callbacks as SSE events arrive. Always calls onDone at the end,
+ * even on error, so the caller can clean up streaming state.
+ *
+ * PRD ref: #3 (Conversational Q&A)
+ */
+export async function sendChatMessage(
+  sessionId: string,
+  question: string,
+  callbacks: ChatCallbacks,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, question }),
+    });
+  } catch {
+    callbacks.onError("Network error: could not reach the server.");
+    callbacks.onDone();
+    return;
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({
+      detail: response.statusText,
+    }));
+    callbacks.onError(body.detail || "Request failed with status " + response.status);
+    callbacks.onDone();
+    return;
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // Process complete SSE events (delimited by double newlines).
+    const parts = buffer.split("\n\n");
+    // The last element is either empty (if the buffer ended with \n\n)
+    // or an incomplete event — keep it in the buffer.
+    buffer = parts.pop()!;
+
+    for (const part of parts) {
+      if (!part.trim()) continue;
+
+      let eventType = "";
+      let data = "";
+      for (const line of part.split("\n")) {
+        if (line.startsWith("event: ")) {
+          eventType = line.slice(7);
+        } else if (line.startsWith("data: ")) {
+          data = line.slice(6);
+        }
+      }
+
+      switch (eventType) {
+        case "explanation":
+          callbacks.onExplanation(data);
+          break;
+        case "result":
+          callbacks.onResult(JSON.parse(data));
+          break;
+        case "cleaning_suggestions":
+          callbacks.onCleaningSuggestions(JSON.parse(data));
+          break;
+        case "error":
+          callbacks.onError(data);
+          break;
+        case "done":
+          callbacks.onDone();
+          return;
+      }
+    }
+  }
+
+  // If the stream ended without a done event, still signal completion.
+  callbacks.onDone();
 }

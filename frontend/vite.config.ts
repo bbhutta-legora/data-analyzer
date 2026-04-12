@@ -17,4 +17,9 @@ export default defineConfig({
       "/api": BACKEND_DEV_URL,
     },
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+  },
 });

@@ -44,6 +44,20 @@ export interface DatasetInfo {
   summary: SummaryData | null;
 }
 
+// ── Message type for Q&A chat (Step 9) ──────────────────────────────────────
+// Each entry in the messages array is either a user question or an assistant
+// response. Assistant messages accumulate fields as SSE events arrive.
+
+export interface Message {
+  role: "user" | "assistant";
+  content: string;
+  code?: string;
+  figures?: string[];
+  stdout?: string;
+  cleaningSuggestions?: CleaningSuggestion[];
+  error?: string;
+}
+
 // ── Store ────────────────────────────────────────────────────────────────────
 
 interface AppState {
@@ -51,7 +65,7 @@ interface AppState {
   apiKey: string | null;
   provider: Provider | null;
   model: string | null;
-  messages: unknown[];
+  messages: Message[];
   isStreaming: boolean;
   datasetInfo: DatasetInfo | null;
   currentScreen: Screen;
@@ -62,9 +76,12 @@ interface AppState {
   setScreen: (screen: Screen) => void;
   setSessionId: (id: string) => void;
   setDatasetInfo: (info: DatasetInfo) => void;
+  addMessage: (message: Message) => void;
+  updateLastAssistantMessage: (fields: Partial<Message>) => void;
+  setStreaming: (streaming: boolean) => void;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   sessionId: null,
   apiKey: null,
   provider: null,
@@ -80,4 +97,22 @@ export const useStore = create<AppState>((set) => ({
   setScreen: (screen) => set({ currentScreen: screen }),
   setSessionId: (id) => set({ sessionId: id }),
   setDatasetInfo: (info) => set({ datasetInfo: info }),
+
+  addMessage: (message) =>
+    set((state) => ({ messages: [...state.messages, message] })),
+
+  updateLastAssistantMessage: (fields) => {
+    const { messages } = get();
+    if (messages.length === 0) return;
+
+    const lastIndex = messages.length - 1;
+    const last = messages[lastIndex];
+    if (last.role !== "assistant") return;
+
+    const updated = [...messages];
+    updated[lastIndex] = { ...last, ...fields };
+    set({ messages: updated });
+  },
+
+  setStreaming: (streaming) => set({ isStreaming: streaming }),
 }));

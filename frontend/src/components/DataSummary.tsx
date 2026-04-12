@@ -6,11 +6,14 @@
 // Key deps: store.ts (DatasetInfo, CleaningSuggestion)
 // Architecture ref: "Frontend Architecture" in planning/architecture.md §4
 //
-// Suggested question clicks are wired in Step 9 (Q&A frontend).
 // Cleaning action API calls are wired in Step 10 (data cleaning).
 
 import { useStore } from "../store";
 import type { DatasetMetadata, CleaningSuggestion } from "../store";
+
+interface DataSummaryProps {
+  onSuggestedQuestionClick?: (question: string) => void;
+}
 
 function MetadataBadge({ label, value }: { label: string; value: string | number }) {
   return (
@@ -71,12 +74,17 @@ function CleaningSuggestionCard({ suggestion }: { suggestion: CleaningSuggestion
   );
 }
 
-function SuggestedQuestionCard({ question }: { question: string }) {
+function SuggestedQuestionCard({
+  question,
+  onClick,
+}: {
+  question: string;
+  onClick?: (question: string) => void;
+}) {
   return (
     <button
       type="button"
-      // REVIEW: onClick handler will be wired in Step 9 (Q&A frontend).
-      // Clicking will send this question as a chat message.
+      onClick={() => onClick?.(question)}
       style={{
         display: "block",
         width: "100%",
@@ -127,7 +135,7 @@ function DatasetMetadataSection({
   );
 }
 
-export function DataSummary() {
+export function DataSummary({ onSuggestedQuestionClick }: DataSummaryProps = {}) {
   const datasetInfo = useStore((s) => s.datasetInfo);
 
   if (!datasetInfo) return null;
@@ -143,7 +151,7 @@ export function DataSummary() {
   const hasSummaryError = summary && "error" in summary && summary.error;
 
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", padding: "32px 24px" }}>
+    <div style={{ marginBottom: 16 }}>
       {/* Assistant message container */}
       <div
         style={{
@@ -211,55 +219,14 @@ export function DataSummary() {
               Here are some questions you could explore:
             </p>
             {summary!.suggested_questions.map((question, idx) => (
-              <SuggestedQuestionCard key={idx} question={question} />
+              <SuggestedQuestionCard
+                key={idx}
+                question={question}
+                onClick={onSuggestedQuestionClick}
+              />
             ))}
           </div>
         )}
-      </div>
-
-      {/* Chat input placeholder — replaced with real input in Step 9 */}
-      <div style={{ marginTop: 24 }}>
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
-          <input
-            type="text"
-            placeholder="Ask a question about your data..."
-            disabled
-            style={{
-              flex: 1,
-              padding: "12px 16px",
-              fontSize: 14,
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              background: "#f9fafb",
-              color: "#9ca3af",
-            }}
-          />
-          <button
-            type="button"
-            disabled
-            style={{
-              padding: "12px 20px",
-              fontSize: 14,
-              fontWeight: 500,
-              background: "#d1d5db",
-              color: "#fff",
-              border: "none",
-              borderRadius: 8,
-              cursor: "not-allowed",
-            }}
-          >
-            Send
-          </button>
-        </div>
-        <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>
-          Chat will be available in a future update.
-        </p>
       </div>
     </div>
   );

@@ -24,7 +24,7 @@
 | 6 | BYOK setup | Vertical | Low | 4, 5 | #8 BYOK | ✅ Done |
 | 7 | Initial summary | Vertical | Medium | 6 | #2 Initial summary | ✅ Done |
 | 8 | Q&A backend | Vertical | High | 7 | #3 Conversational Q&A | ✅ Done |
-| 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A | |
+| 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A | ✅ Done |
 | 10 | Data cleaning | Vertical | Medium | 9 | #4 Data cleaning | |
 | 11 | Error recovery | Vertical | Medium | 9 | #6 Error recovery | |
 | 12 | Guided ML backend | Vertical | High | 8 | #5 Guided ML | |
