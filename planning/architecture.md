@@ -50,18 +50,20 @@ backend/
 **`main.py`** — FastAPI application. Defines all HTTP endpoints and the SSE streaming endpoint. Wires together the other modules. Handles CORS, file upload parsing, and request validation.
 
 **`session.py`** — Manages an in-memory dict of sessions keyed by session ID (UUID). Each session holds:
-- `dataframe_original`: the uploaded dataset (immutable reference)
-- `dataframe`: the current working dataset (mutated by cleaning operations)
+- `dataframes_original`: immutable snapshots of all uploaded DataFrames, keyed by name (e.g. `{"sales": df, "costs": df}`)
+- `dataframes`: the current working copies, keyed by name; mutated by cleaning operations
 - `conversation_history`: list of `{role, content}` messages for LLM context
 - `code_history`: list of `{code, explanation, result}` entries for notebook export
 - `exec_namespace`: the Python namespace dict used by the sandbox
 - `api_key`: the user's LLM API key (held in memory only)
 
+For CSV uploads, `dataframes` contains a single entry keyed by the filename stem. For multi-sheet Excel uploads, it contains one entry per sheet. Each DataFrame is independently copied at creation time so mutations to one cannot affect others or their originals.
+
 Sessions are created on file upload and discarded on explicit close or server restart. No persistence.
 
 **`llm.py`** — Constructs prompts that include dataset metadata (column names, dtypes, shape, sample rows) and conversation history. Sends requests to the LLM API. Parses the structured JSON response into a typed object with `code`, `explanation`, and optional `cleaning_suggestions` fields. The system prompt instructs the LLM to proactively surface data quality issues relevant to the current question. Handles the auto-retry flow: on code execution failure, re-prompts the LLM with the error context.
 
-**`executor.py`** — Runs LLM-generated code via `exec()` in a restricted namespace. The namespace is pre-populated with `pandas`, `numpy`, `matplotlib`, `seaborn`, `sklearn`, and the session's current dataframe. Captures matplotlib figures as base64 PNG by hooking `plt.savefig()` to a bytes buffer. Captures printed output and expression results. Returns a structured result object with `stdout`, `figures` (list of base64 strings), `error` (if any), and `dataframe_changed` flag.
+**`executor.py`** — Runs LLM-generated code via `exec()` in a restricted namespace. The namespace is pre-populated with `pandas`, `numpy`, `matplotlib`, `seaborn`, `sklearn`, and `dfs` — a dict of all session DataFrames keyed by name. Captures matplotlib figures as base64 PNG by hooking `plt.savefig()` to a bytes buffer. Captures printed output and expression results. Returns a structured result object with `stdout`, `figures` (list of base64 strings), `error` (if any), and `dataframe_changed` flag.
 
 **`exporter.py`** — Builds a Jupyter notebook (`.ipynb` JSON) from the session's code history. Each entry becomes a code cell + a markdown cell (for the explanation). Adds a header cell with import statements and a cell that loads the dataset. The exported notebook is self-contained and runnable.
 
@@ -162,14 +164,14 @@ SSE event types for the chat stream:
 
 The `exec()` namespace is pre-populated with:
 - `pd` (pandas), `np` (numpy), `plt` (matplotlib.pyplot), `sns` (seaborn), `sklearn`
-- `df` — the session's current dataframe
+- `dfs` — a `dict[str, pd.DataFrame]` of all session DataFrames keyed by name. LLM-generated code accesses DataFrames as `dfs["name"]`. This is the single access pattern for all upload types — one DataFrame or many.
 - `print` — captured to a string buffer
 
 Restricted by removing: `__import__`, `open`, `eval`, `exec`, `compile`, `__builtins__` (replaced with a safe subset). This prevents filesystem access, network calls, and dynamic imports.
 
 Figure capture: after `exec()`, check `plt.get_fignums()`. For each open figure, save to a `BytesIO` buffer as PNG, encode as base64, then `plt.close()`.
 
-Resource limits: execution timeout via `signal.alarm()` to prevent infinite loops.
+Resource limits: execution timeout via `multiprocessing.Process` + `process.kill()` — cross-platform, no `signal.SIGALRM`.
 
 ## 7. LLM Prompting
 

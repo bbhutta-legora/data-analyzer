@@ -37,27 +37,41 @@ _BLOCKED_BUILTINS = frozenset({
 
 
 def _detect_dataframe_change(
-    original_shape: tuple,
-    original_columns: list,
-    new_df: object,
+    original_snapshot: dict[str, tuple],
+    new_dfs: object,
 ) -> bool:
     """
-    Fast change detection using shape and column list instead of .equals().
+    Detect whether any DataFrame in the dfs dict changed after code execution.
 
-    Returns True if the dataframe's shape or columns changed, or if df was replaced
-    with a non-DataFrame object. Does not detect value-level changes (e.g. a single
-    cell being overwritten) — those are acceptable to miss for this use case.
+    original_snapshot maps name → (shape, columns) captured before execution.
+
+    Returns True if:
+    - new_dfs is not a dict (dfs was replaced entirely)
+    - the set of keys changed (a DataFrame was added or removed)
+    - any individual DataFrame's shape or columns changed
+
+    Does not detect value-level changes (e.g. a single cell overwritten) — those are
+    acceptable to miss for this use case; shape/column changes cover cleaning operations.
     """
-    has_shape = hasattr(new_df, "shape")
-    has_columns = hasattr(new_df, "columns")
-
-    if not has_shape or not has_columns:
+    if not isinstance(new_dfs, dict):
         return True
 
-    return new_df.shape != original_shape or list(new_df.columns) != original_columns
+    if set(new_dfs.keys()) != set(original_snapshot.keys()):
+        return True
+
+    for name, (original_shape, original_columns) in original_snapshot.items():
+        new_df = new_dfs[name]
+        has_shape = hasattr(new_df, "shape")
+        has_columns = hasattr(new_df, "columns")
+        if not has_shape or not has_columns:
+            return True
+        if new_df.shape != original_shape or list(new_df.columns) != original_columns:
+            return True
+
+    return False
 
 
-def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
+def _execute_in_sandbox(code: str, dfs_pickle: bytes) -> dict:
     """
     Execute code in a sandboxed namespace and return structured results.
 
@@ -73,11 +87,11 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
     - Blocked builtin called → result["error"] contains ImportError/NameError traceback
 
     Returns dict with keys:
-        stdout          (str)       — captured print() output
-        figures         (list[str]) — base64-encoded PNG strings, one per figure
-        error           (str|None)  — traceback string if execution failed
-        dataframe_changed (bool)    — True if df shape or columns changed
-        new_df_pickle   (bytes|None)— pickled new df if it changed, else None
+        stdout            (str)        — captured print() output
+        figures           (list[str])  — base64-encoded PNG strings, one per figure
+        error             (str|None)   — traceback string if execution failed
+        dataframe_changed (bool)       — True if any DataFrame's shape or columns changed
+        new_dfs_pickle    (bytes|None) — pickled updated dfs dict if changed, else None
     """
     import io
     import base64
@@ -97,9 +111,12 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
         if k not in _BLOCKED_BUILTINS
     }
 
-    df = pickle.loads(df_pickle)
-    original_shape = df.shape
-    original_columns = list(df.columns)
+    dfs = pickle.loads(dfs_pickle)
+    # Snapshot shapes and columns before execution for change detection.
+    # Using shape/columns rather than full copies avoids doubling memory for large DataFrames.
+    original_dfs_snapshot: dict[str, tuple] = {
+        name: (df.shape, list(df.columns)) for name, df in dfs.items()
+    }
 
     plt.close("all")
 
@@ -110,7 +127,7 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
 
     namespace = {
         **SANDBOX_NAMESPACE_LIBRARIES,
-        "df": df,
+        "dfs": dfs,
         "__builtins__": safe_builtins,
     }
 
@@ -119,7 +136,7 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
         "figures": [],
         "error": None,
         "dataframe_changed": False,
-        "new_df_pickle": None,
+        "new_dfs_pickle": None,
     }
 
     output = io.StringIO()
@@ -133,7 +150,7 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
         result["error"] = traceback.format_exc()
         return result
 
-    # --- Infrastructure: figure capture + df change detection ---
+    # --- Infrastructure: figure capture + dfs change detection ---
     # Errors here are our fault, not the user's. Surface them distinctly
     # so the user doesn't waste time debugging their code for our bug.
     try:
@@ -145,11 +162,10 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
             result["figures"].append(base64.b64encode(buf.read()).decode("utf-8"))
             plt.close(fig)
 
-        new_df = namespace.get("df", df)
-        if _detect_dataframe_change(original_shape, original_columns, new_df):
+        new_dfs = namespace.get("dfs", dfs)
+        if _detect_dataframe_change(original_dfs_snapshot, new_dfs):
             result["dataframe_changed"] = True
-            if hasattr(new_df, "to_pickle"):
-                result["new_df_pickle"] = pickle.dumps(new_df)
+            result["new_dfs_pickle"] = pickle.dumps(new_dfs)
     except Exception:
         result["error"] = (
             "Internal sandbox error (not caused by your code): "
@@ -159,7 +175,7 @@ def _execute_in_sandbox(code: str, df_pickle: bytes) -> dict:
     return result
 
 
-def _worker_process(code: str, df_pickle: bytes, conn: "multiprocessing.connection.Connection") -> None:
+def _worker_process(code: str, dfs_pickle: bytes, conn: "multiprocessing.connection.Connection") -> None:
     """
     Entry point for the child process spawned by execute_code().
 
@@ -169,11 +185,11 @@ def _worker_process(code: str, df_pickle: bytes, conn: "multiprocessing.connecti
     """
     import traceback
     try:
-        result = _execute_in_sandbox(code, df_pickle)
+        result = _execute_in_sandbox(code, dfs_pickle)
         conn.send(result)
     except Exception:
         conn.send({"stdout": "", "figures": [], "error": traceback.format_exc(),
-                    "dataframe_changed": False, "new_df_pickle": None})
+                    "dataframe_changed": False, "new_dfs_pickle": None})
     finally:
         conn.close()
 
@@ -186,8 +202,8 @@ def execute_code(
     """
     Public API: run _execute_in_sandbox in an isolated child process with a timeout.
 
-    Extracts the DataFrame from namespace, pickles it into the child process,
-    and writes the updated DataFrame back to namespace["df"] if it changed.
+    Extracts the dfs dict from namespace, pickles it into the child process,
+    and writes the updated dfs dict back to namespace["dfs"] if any DataFrame changed.
 
     Uses multiprocessing.Process so the child can be killed with process.kill()
     on timeout — no zombie threads, no GIL contention, works on all platforms.
@@ -198,10 +214,10 @@ def execute_code(
     - Child process crash → result["error"] describes the crash
 
     Returns dict with keys: stdout, figures, error, dataframe_changed
-    (new_df_pickle is consumed internally and not exposed to callers)
+    (new_dfs_pickle is consumed internally and not exposed to callers)
     """
-    df = namespace.get("df")
-    df_pickle = pickle.dumps(df)
+    dfs = namespace.get("dfs")
+    dfs_pickle = pickle.dumps(dfs)
 
     public_result: dict = {
         "stdout": "",
@@ -214,7 +230,7 @@ def execute_code(
 
     process = multiprocessing.Process(
         target=_worker_process,
-        args=(code, df_pickle, child_conn),
+        args=(code, dfs_pickle, child_conn),
         daemon=True,
     )
     process.start()
@@ -236,8 +252,8 @@ def execute_code(
         public_result["error"] = worker_result.get("error")
         public_result["dataframe_changed"] = worker_result.get("dataframe_changed", False)
 
-        if worker_result.get("new_df_pickle") is not None:
-            namespace["df"] = pickle.loads(worker_result["new_df_pickle"])
+        if worker_result.get("new_dfs_pickle") is not None:
+            namespace["dfs"] = pickle.loads(worker_result["new_dfs_pickle"])
     else:
         public_result["error"] = "Code execution failed: child process exited without producing a result"
 

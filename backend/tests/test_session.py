@@ -5,17 +5,19 @@
 #
 # Confirmed behavior list (TEST-STRATEGY Step 1):
 #  1. Create returns unique string IDs
-#  2. Get by ID returns stored session
+#  2. Get by ID returns stored session with correct DataFrames
 #  3. Get non-existent ID returns None
 #  4. Delete existing session returns True and makes it unretrievable
 #  5. Delete non-existent ID returns False silently
 #  6. Session starts with empty conversation and code history
-#  7. exec_namespace contains df bound to the session's dataframe
-#  8. External mutation after create does not affect session's dataframe
-#  9. Mutating the working copy does not affect the original dataframe
+#  7. exec_namespace contains dfs bound to the session's DataFrames dict
+#  8. External mutation after create does not affect session's DataFrames
+#  9. Mutating a working copy does not affect the original
 # 10. exec_namespace pre-loads pd, np, plt, sns, sklearn
-# 11. Creating a session with an empty dataframe succeeds
+# 11. Creating a session with an empty DataFrame succeeds
 # 12. api_key is stored and retrievable on the session
+# 13. Creating a session with multiple DataFrames stores all of them by name
+# 14. Each DataFrame in the dict is independently copied — mutating one doesn't affect others
 
 import pandas as pd
 from session import SessionStore
@@ -32,15 +34,19 @@ def small_df() -> pd.DataFrame:
     return pd.DataFrame({"a": [1, 2, 3]})
 
 
+def make_dfs() -> dict[str, pd.DataFrame]:
+    """Single-DataFrame dict — the common case (e.g. CSV upload)."""
+    return {"data": small_df()}
+
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 def test_create_returns_unique_string_ids():
     # Behavior 1: unique IDs across multiple creates.
     # Why: colliding IDs merge two users' sessions, corrupting their data.
     store = make_store()
-    df = small_df()
-    id1 = store.create(df)
-    id2 = store.create(df)
+    id1 = store.create(make_dfs())
+    id2 = store.create(make_dfs())
     assert isinstance(id1, str)
     assert isinstance(id2, str)
     assert id1 != id2
@@ -51,10 +57,10 @@ def test_get_by_id_returns_stored_session():
     # Why: every chat message and export depends on fetching the right session.
     store = make_store()
     df = small_df()
-    session_id = store.create(df)
+    session_id = store.create({"data": df})
     session = store.get(session_id)
     assert session is not None
-    assert session.dataframe.equals(df)
+    assert session.dataframes["data"].equals(df)
 
 
 def test_get_nonexistent_id_returns_none():
@@ -69,7 +75,7 @@ def test_delete_existing_session_returns_true_and_removes_it():
     # Behavior 4: deleting a session returns True and makes it unretrievable.
     # Why: confirms the delete path works so future cleanup logic can rely on it.
     store = make_store()
-    session_id = store.create(small_df())
+    session_id = store.create(make_dfs())
     deleted = store.delete(session_id)
     assert deleted is True
     assert store.get(session_id) is None
@@ -89,41 +95,41 @@ def test_session_starts_with_empty_conversation_and_code_history():
     # Why: if history isn't empty, the LLM receives phantom prior messages on the first turn,
     #      producing a confusing or incorrect response.
     store = make_store()
-    session = store.get(store.create(small_df()))
+    session = store.get(store.create(make_dfs()))
     assert session.conversation_history == []
     assert session.code_history == []
 
 
-def test_exec_namespace_contains_df():
-    # Behavior 7: exec_namespace has 'df' bound to the session's dataframe.
-    # Why: LLM-generated code always references 'df'; a missing binding means every
+def test_exec_namespace_contains_dfs():
+    # Behavior 7: exec_namespace has 'dfs' bound to the session's DataFrames dict.
+    # Why: LLM-generated code always references dfs["name"]; a missing binding means every
     #      code execution fails with NameError.
     store = make_store()
     df = pd.DataFrame({"x": [10, 20]})
-    session = store.get(store.create(df))
-    assert "df" in session.exec_namespace
-    assert session.exec_namespace["df"].equals(df)
+    session = store.get(store.create({"data": df}))
+    assert "dfs" in session.exec_namespace
+    assert session.exec_namespace["dfs"]["data"].equals(df)
 
 
 def test_external_mutation_after_create_does_not_affect_session():
-    # Behavior 8: the session copies the dataframe on creation.
+    # Behavior 8: the session copies each DataFrame on creation.
     # Why: if the caller mutates their reference after creating the session, the session
     #      should not silently reflect that — it would corrupt the working copy mid-analysis.
     store = make_store()
     df = small_df()
-    session = store.get(store.create(df))
-    df = df.drop(columns=["a"])  # Mutate the caller's reference
-    assert "a" in session.dataframe.columns
+    session = store.get(store.create({"data": df}))
+    df.drop(columns=["a"], inplace=True)
+    assert "a" in session.dataframes["data"].columns
 
 
 def test_mutating_working_copy_does_not_affect_original():
-    # Behavior 9: session.dataframe_original is immune to changes on session.dataframe.
+    # Behavior 9: dataframes_original is immune to changes on dataframes.
     # Why: data cleaning is destructive; if the original isn't protected, "reset to original"
     #      is impossible without re-uploading the file.
     store = make_store()
-    session = store.get(store.create(small_df()))
-    session.dataframe = session.dataframe.drop(columns=["a"])
-    assert "a" in session.dataframe_original.columns
+    session = store.get(store.create(make_dfs()))
+    session.dataframes["data"] = session.dataframes["data"].drop(columns=["a"])
+    assert "a" in session.dataframes_original["data"].columns
 
 
 def test_exec_namespace_preloads_standard_libraries():
@@ -131,7 +137,7 @@ def test_exec_namespace_preloads_standard_libraries():
     # Why: LLM-generated code uses these without importing them. A missing binding means
     #      every code execution fails with NameError, breaking the entire Q&A feature.
     store = make_store()
-    session = store.get(store.create(small_df()))
+    session = store.get(store.create(make_dfs()))
     ns = session.exec_namespace
     for lib_name in ("pd", "np", "plt", "sns", "sklearn"):
         assert lib_name in ns, f"Expected '{lib_name}' in exec_namespace but it was missing"
@@ -143,7 +149,7 @@ def test_create_with_empty_dataframe_succeeds():
     #      clean message telling the user their file has no data.
     store = make_store()
     empty_df = pd.DataFrame({"col1": [], "col2": []})
-    session_id = store.create(empty_df)
+    session_id = store.create({"data": empty_df})
     assert store.get(session_id) is not None
 
 
@@ -152,6 +158,33 @@ def test_api_key_is_stored_and_retrievable():
     # Why: the BYOK key is stored per-session so it doesn't have to be re-sent on every
     #      chat message. If it isn't stored, every LLM call fails with an auth error.
     store = make_store()
-    session_id = store.create(small_df(), api_key="sk-test-key")
+    session_id = store.create(make_dfs(), api_key="sk-test-key")
     session = store.get(session_id)
     assert session.api_key == "sk-test-key"
+
+
+def test_create_with_multiple_dataframes_stores_all_by_name():
+    # Behavior 13: a session created with multiple DataFrames retains all of them.
+    # Why: multi-sheet Excel uploads need every sheet retrievable by name;
+    #      a missing sheet means the user loses data silently.
+    store = make_store()
+    df_sales = pd.DataFrame({"revenue": [100, 200]})
+    df_costs = pd.DataFrame({"amount": [50, 75]})
+    session = store.get(store.create({"sales": df_sales, "costs": df_costs}))
+    assert "sales" in session.dataframes
+    assert "costs" in session.dataframes
+    assert session.dataframes["sales"].equals(df_sales)
+    assert session.dataframes["costs"].equals(df_costs)
+
+
+def test_mutating_one_dataframe_does_not_affect_others():
+    # Behavior 14: each DataFrame in the dict is independently copied.
+    # Why: cleaning "sales" should never silently corrupt "costs" or either original.
+    store = make_store()
+    df_sales = pd.DataFrame({"revenue": [100]})
+    df_costs = pd.DataFrame({"amount": [50]})
+    session = store.get(store.create({"sales": df_sales, "costs": df_costs}))
+    session.dataframes["sales"] = session.dataframes["sales"].drop(columns=["revenue"])
+    assert "amount" in session.dataframes["costs"].columns
+    assert "revenue" in session.dataframes_original["sales"].columns
+    assert "amount" in session.dataframes_original["costs"].columns

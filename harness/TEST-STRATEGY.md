@@ -107,7 +107,13 @@ You judge based on the behavior description from Step 1, not the code. If the co
 
 After all tests pass, the AI does two checks:
 
-**Break-the-implementation check.** The AI deliberately breaks the key behavior in the implementation (e.g. comments out the line that moves the task) and runs the tests again. If the tests still pass, they aren't checking the behavior — the test is a false positive and must be fixed before proceeding. After the check, the AI restores the implementation.
+**Break-the-implementation check.** Before touching any code, the AI states its plan in plain English:
+
+1. **What I'm breaking:** the specific line or behavior being deliberately sabotaged (e.g. "removing the `.copy()` call so working copies and originals share the same reference")
+2. **Which tests should fail:** the specific test names that are responsible for catching this (e.g. "test_external_mutation_after_create, test_mutating_working_copy, test_mutating_one_dataframe")
+3. **Why those tests and not others:** a brief explanation of why the other tests aren't expected to fail (e.g. "the retrieval tests check data presence, not copy isolation — they pass even with shared references")
+
+Then the AI makes the break, runs the tests, confirms the expected tests fail (and only those), and restores the implementation. If unexpected tests fail or expected tests don't fail, investigate before proceeding.
 
 **Self-audit.** The AI writes a plain-English summary of what it built:
 

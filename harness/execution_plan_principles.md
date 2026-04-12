@@ -39,7 +39,7 @@ The phases of work, presented as a numbered list. Every execution plan uses this
 | A | Test spec | Present behaviors and test cases to the user for review (TEST-STRATEGY.md Steps 1–2). Wait for confirmation. |
 | B | Tests | Write test file(s), run them, confirm all fail for the right reasons (TEST-STRATEGY.md Steps 3–4). |
 | C | Implementation | Write the production code to make tests pass (TEST-STRATEGY.md Step 5). |
-| D | Verification | Break-the-implementation check, self-audit summary (TEST-STRATEGY.md Steps 6–7). Present for user confirmation. |
+| D | Verification | Break-the-implementation check (state what you're breaking, which tests should fail, and why before touching code), self-audit summary (TEST-STRATEGY.md Steps 6–7). Present for user confirmation. |
 | E | Code review | Scan all changed files against `harness/code_review_patterns.md`. Fix violations, re-run tests. |
 | F | Reflection | Follow `harness/reflection.md` — capture learnings, propose harness updates if warranted. |
 
@@ -64,6 +64,34 @@ Where the implementation will differ from what the planning document proposes, a
 - A simpler or more robust approach exists
 
 If there are no deviations, say so explicitly.
+
+---
+
+## Refactor-Specific Guidance
+
+Refactors follow the same phases (A–F) but differ from feature steps in a few important ways.
+
+### Phase A is about diffs, not behaviors
+
+For a refactor, the behaviors being tested mostly already exist — they passed before and should still pass after. Phase A should focus on:
+
+1. **What changes in the test contracts** — new field names, renamed variables, updated assertions
+2. **Any genuinely new behaviors** introduced by the redesign (e.g. multi-DataFrame isolation)
+3. **Explicitly skipping behaviors** that are purely mechanical fixture updates with no semantic change
+
+Do not re-present the full behavior list from scratch. Present the delta.
+
+### Verify existing tests fail for the right reason
+
+When updating tests for a refactor, a test that fails with `AttributeError: object has no attribute 'new_name'` is failing for the right reason — the implementation hasn't been updated yet. A test that fails with a logic assertion error may mean the test was updated incorrectly. Check carefully before proceeding to Phase C.
+
+### Break check targets the new invariant, not the old one
+
+For refactors, the break-the-implementation check should deliberately break the *new* behavior introduced by the refactor (e.g. the independent copy invariant), not a behavior that existed before. The pre-existing behaviors are already covered by prior tests.
+
+### Planning docs almost always need updating
+
+Refactors change module interfaces, data models, or API contracts — all of which are documented in `planning/architecture.md`. Phase F should always update architecture to reflect the new structure, and check `planning/implementiton plan.md` for any remaining steps that reference the old structure.
 
 ---
 
