@@ -30,6 +30,7 @@ export interface DatasetMetadata {
 export interface CleaningSuggestion {
   description: string;
   options: string[];
+  dataset_name?: string;
 }
 
 export interface SummaryData {
@@ -69,6 +70,7 @@ interface AppState {
   isStreaming: boolean;
   datasetInfo: DatasetInfo | null;
   currentScreen: Screen;
+  hasAppliedCleaning: boolean;
 
   setApiKey: (key: string) => void;
   setProvider: (provider: Provider) => void;
@@ -76,6 +78,8 @@ interface AppState {
   setScreen: (screen: Screen) => void;
   setSessionId: (id: string) => void;
   setDatasetInfo: (info: DatasetInfo) => void;
+  updateDatasetMetadata: (datasetName: string, metadata: DatasetMetadata) => void;
+  setHasAppliedCleaning: (value: boolean) => void;
   addMessage: (message: Message) => void;
   updateLastAssistantMessage: (fields: Partial<Message>) => void;
   setStreaming: (streaming: boolean) => void;
@@ -90,6 +94,7 @@ export const useStore = create<AppState>((set, get) => ({
   isStreaming: false,
   datasetInfo: null,
   currentScreen: "setup",
+  hasAppliedCleaning: false,
 
   setApiKey: (key) => set({ apiKey: key }),
   setProvider: (provider) => set({ provider }),
@@ -97,6 +102,21 @@ export const useStore = create<AppState>((set, get) => ({
   setScreen: (screen) => set({ currentScreen: screen }),
   setSessionId: (id) => set({ sessionId: id }),
   setDatasetInfo: (info) => set({ datasetInfo: info }),
+  setHasAppliedCleaning: (value) => set({ hasAppliedCleaning: value }),
+
+  updateDatasetMetadata: (datasetName, metadata) =>
+    set((state) => {
+      if (!state.datasetInfo) return state;
+      return {
+        datasetInfo: {
+          ...state.datasetInfo,
+          datasets: {
+            ...state.datasetInfo.datasets,
+            [datasetName]: metadata,
+          },
+        },
+      };
+    }),
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),

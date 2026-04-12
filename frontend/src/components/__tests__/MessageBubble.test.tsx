@@ -1,5 +1,5 @@
 // MessageBubble.test.tsx
-// Tests for the MessageBubble component added in Step 9.
+// Tests for the MessageBubble component added in Step 9, updated in Step 11.
 //
 // Behaviors tested:
 //  14. Renders user message content with a "You" label
@@ -10,7 +10,10 @@
 //  19. Clicking "Show code" reveals the code block
 //  20. Clicking "Hide code" hides the code block again
 //  21. Renders stdout text when present in result
-//  22. Renders an error state when the message has an error field
+//  22. Renders a friendly error message when error field is present
+//  23. Raw error detail is hidden by default behind "Show details" toggle
+//  24. Clicking "Show details" reveals raw error traceback
+//  25. Clicking "Hide details" collapses raw error traceback
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -123,8 +126,8 @@ describe("MessageBubble", () => {
     expect(screen.getByText(/revenue\s+200\.0/)).toBeInTheDocument();
   });
 
-  // Behavior 22
-  it("renders an error state when message has an error field", () => {
+  // Behavior 22: friendly error wrapper is shown
+  it("renders a friendly error message when error field is present", () => {
     const msg: Message = {
       role: "assistant",
       content: "",
@@ -132,6 +135,50 @@ describe("MessageBubble", () => {
     };
     render(<MessageBubble message={msg} />);
 
-    expect(screen.getByText(/NameError/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/couldn.t execute the analysis/i),
+    ).toBeInTheDocument();
+  });
+
+  // Behavior 23: raw error hidden by default
+  it("hides raw error traceback behind Show details toggle by default", () => {
+    const msg: Message = {
+      role: "assistant",
+      content: "",
+      error: "NameError: x is not defined",
+    };
+    render(<MessageBubble message={msg} />);
+
+    expect(screen.queryByText("NameError: x is not defined")).not.toBeInTheDocument();
+    expect(screen.getByText(/show details/i)).toBeInTheDocument();
+  });
+
+  // Behavior 24: clicking "Show details" reveals raw error
+  it("reveals raw error when Show details is clicked", async () => {
+    const user = userEvent.setup();
+    const msg: Message = {
+      role: "assistant",
+      content: "",
+      error: "NameError: x is not defined",
+    };
+    render(<MessageBubble message={msg} />);
+
+    await user.click(screen.getByText(/show details/i));
+    expect(screen.getByText("NameError: x is not defined")).toBeInTheDocument();
+  });
+
+  // Behavior 25: clicking "Hide details" collapses raw error
+  it("hides raw error when Hide details is clicked", async () => {
+    const user = userEvent.setup();
+    const msg: Message = {
+      role: "assistant",
+      content: "",
+      error: "NameError: x is not defined",
+    };
+    render(<MessageBubble message={msg} />);
+
+    await user.click(screen.getByText(/show details/i));
+    await user.click(screen.getByText(/hide details/i));
+    expect(screen.queryByText("NameError: x is not defined")).not.toBeInTheDocument();
   });
 });

@@ -363,8 +363,11 @@ def test_chat_endpoint_returns_400_for_empty_question():
 
 
 def test_chat_endpoint_streams_error_on_execution_failure():
-    # Behavior 17: when code execution fails, the stream contains an error event.
+    # Behavior 17: when code execution fails on BOTH attempts (original + retry),
+    # the stream contains an error event.
     # Why: the user needs to know their question couldn't be answered.
+    # Updated for Step 11: a single failure triggers a retry, so both attempts
+    # must fail for the error event to be emitted.
     session_id = create_session_with_data()
 
     failed_execution: dict = {

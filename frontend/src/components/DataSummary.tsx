@@ -3,13 +3,12 @@
 // on the chat screen. Includes dataset metadata, cleaning suggestion action cards,
 // and clickable suggested question cards.
 // Supports: PRD #2 (initial summary), #4 (cleaning suggestions)
-// Key deps: store.ts (DatasetInfo, CleaningSuggestion)
+// Key deps: store.ts (DatasetInfo), CleaningSuggestionCard
 // Architecture ref: "Frontend Architecture" in planning/architecture.md §4
-//
-// Cleaning action API calls are wired in Step 10 (data cleaning).
 
 import { useStore } from "../store";
-import type { DatasetMetadata, CleaningSuggestion } from "../store";
+import type { DatasetMetadata } from "../store";
+import { CleaningSuggestionCard } from "./CleaningSuggestionCard";
 
 interface DataSummaryProps {
   onSuggestedQuestionClick?: (question: string) => void;
@@ -31,46 +30,6 @@ function MetadataBadge({ label, value }: { label: string; value: string | number
     >
       <strong>{value}</strong> {label}
     </span>
-  );
-}
-
-function CleaningSuggestionCard({ suggestion }: { suggestion: CleaningSuggestion }) {
-  return (
-    <div
-      style={{
-        padding: "12px 16px",
-        border: "1px solid #fde68a",
-        background: "#fffbeb",
-        borderRadius: 8,
-        marginBottom: 10,
-      }}
-    >
-      <p style={{ margin: "0 0 10px", fontSize: 14, color: "#92400e" }}>
-        {suggestion.description}
-      </p>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {suggestion.options.map((option) => (
-          <button
-            key={option}
-            type="button"
-            // REVIEW: onClick handler will be wired in Step 10 (data cleaning).
-            // For now the buttons render but are non-functional.
-            style={{
-              padding: "6px 14px",
-              fontSize: 13,
-              fontWeight: 500,
-              background: "#fff",
-              border: "1px solid #d6b35a",
-              borderRadius: 5,
-              cursor: "pointer",
-              color: "#78350f",
-            }}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 

@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import type { Message } from "../store";
+import { CleaningSuggestionCard } from "./CleaningSuggestionCard";
 
 interface MessageBubbleProps {
   message: Message;
@@ -42,8 +43,10 @@ function UserBubble({ content }: { content: string }) {
 
 function AssistantBubble({ message }: { message: Message }) {
   const [showCode, setShowCode] = useState(false);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
   const hasFigures = message.figures && message.figures.length > 0;
   const hasCode = !!message.code;
+  const hasCleaningSuggestions = message.cleaningSuggestions && message.cleaningSuggestions.length > 0;
 
   return (
     <div
@@ -70,7 +73,38 @@ function AssistantBubble({ message }: { message: Message }) {
             color: "#991b1b",
           }}
         >
-          {message.error}
+          <p style={{ margin: "0 0 8px" }}>
+            I couldn&apos;t execute the analysis. Try rephrasing your question or being more specific.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowErrorDetails(!showErrorDetails)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 13,
+              color: "#991b1b",
+              padding: "4px 0",
+            }}
+          >
+            {showErrorDetails ? "\u25BC Hide details" : "\u25B6 Show details"}
+          </button>
+          {showErrorDetails && (
+            <pre
+              style={{
+                background: "#fef2f2",
+                fontSize: 12,
+                lineHeight: 1.5,
+                overflowX: "auto",
+                marginTop: 6,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {message.error}
+            </pre>
+          )}
         </div>
       )}
 
@@ -112,6 +146,14 @@ function AssistantBubble({ message }: { message: Message }) {
             }}
           />
         ))}
+
+      {hasCleaningSuggestions && (
+        <div style={{ marginTop: 12 }}>
+          {message.cleaningSuggestions!.map((suggestion, idx) => (
+            <CleaningSuggestionCard key={idx} suggestion={suggestion} />
+          ))}
+        </div>
+      )}
 
       {hasCode && (
         <div style={{ marginTop: 4 }}>

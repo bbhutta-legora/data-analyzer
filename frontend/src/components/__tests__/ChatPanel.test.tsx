@@ -17,9 +17,11 @@ import { ChatPanel } from "../ChatPanel";
 import { useStore } from "../../store";
 import type { DatasetInfo } from "../../store";
 
-// Mock sendChatMessage so tests don't make real fetch calls
+// Mock API functions so tests don't make real fetch/navigation calls
 vi.mock("../../api", () => ({
   sendChatMessage: vi.fn().mockResolvedValue(undefined),
+  exportNotebook: vi.fn().mockResolvedValue(undefined),
+  resetDatasets: vi.fn().mockResolvedValue({ datasets: {} }),
 }));
 
 const TEST_DATASET_INFO: DatasetInfo = {
@@ -45,6 +47,7 @@ function resetStore() {
     isStreaming: false,
     datasetInfo: TEST_DATASET_INFO,
     sessionId: "test-session",
+    hasAppliedCleaning: false,
   });
 }
 
@@ -123,6 +126,25 @@ describe("ChatPanel", () => {
     expect(sendButton).toBeDisabled();
   });
 
+  // Behavior 30 — Export button (Step 14)
+  it("renders an Export Notebook button", () => {
+    render(<ChatPanel />);
+    const exportButton = screen.getByRole("button", { name: /export notebook/i });
+    expect(exportButton).toBeInTheDocument();
+    expect(exportButton).toBeEnabled();
+  });
+
+  it("clicking Export Notebook calls exportNotebook with the session ID", async () => {
+    const { exportNotebook } = await import("../../api");
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    const exportButton = screen.getByRole("button", { name: /export notebook/i });
+    await user.click(exportButton);
+
+    expect(exportNotebook).toHaveBeenCalledWith("test-session");
+  });
+
   // Behavior 29
   it("clicking a suggested question sends it as a chat message", async () => {
     const user = userEvent.setup();
@@ -137,5 +159,30 @@ describe("ChatPanel", () => {
       role: "user",
       content: "What is the average of column a?",
     });
+  });
+
+  // ── Export audit-gap tests ──────────────────────────────────────────────
+
+  it("Export button is disabled when isStreaming is true", () => {
+    useStore.setState({ isStreaming: true });
+    render(<ChatPanel />);
+
+    const exportButton = screen.getByRole("button", { name: /export notebook/i });
+    expect(exportButton).toBeDisabled();
+  });
+
+  it("Export error shows a user-visible error message", async () => {
+    const { exportNotebook } = await import("../../api");
+    vi.mocked(exportNotebook).mockRejectedValueOnce(new Error("Session not found"));
+
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    const exportButton = screen.getByRole("button", { name: /export notebook/i });
+    await user.click(exportButton);
+
+    // The error should appear as an alert element
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Session not found");
   });
 });

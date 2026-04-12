@@ -254,6 +254,96 @@ def run_code(code: str, namespace: dict) -> ExecutionResult:
 
 ---
 
+### LLM Option Text to Deterministic Action Mapping
+
+When the LLM produces user-facing option text (e.g., cleaning suggestion buttons like "Drop rows" or "Fill with median"), the frontend must translate that free-form text into a deterministic backend action name. Use a normalized lookup table on the frontend rather than passing LLM text directly to the backend.
+
+#### ✓ Pattern: Explicit lookup table with normalization
+```typescript
+// Frontend: normalize LLM option text to backend action names
+const OPTION_TO_ACTION: Record<string, string> = {
+  "drop rows": "drop_missing_rows",
+  "drop missing rows": "drop_missing_rows",
+  "fill with median": "fill_median",
+  "drop duplicates": "drop_duplicates",
+  "remove duplicates": "drop_duplicates",
+};
+
+function resolveAction(optionText: string): string | null {
+  const normalized = optionText.toLowerCase().trim();
+  return OPTION_TO_ACTION[normalized] ?? null;
+}
+```
+
+#### ❌ Anti-Pattern: Passing LLM text directly to the backend
+```typescript
+// BAD: backend receives free-form text like "Drop the duplicate rows please"
+await fetch("/api/clean", {
+  body: JSON.stringify({ action: option }),  // LLM text as action — fragile
+});
+```
+
+**Why this matters:** The LLM may use synonyms, different casing, or slightly different phrasing each time. A normalization layer with multiple aliases per action absorbs this variance. The backend only needs to validate against a small set of known action strings (`VALID_ACTIONS`). Include common synonyms in the lookup table (e.g., both "drop duplicates" and "remove duplicates"). When a new action is added, update both the backend's `VALID_ACTIONS` and the frontend's `OPTION_TO_ACTION`.
+
+---
+
+### Multi-Stage Prompt Chains with a Generic Parser
+
+When building a multi-stage LLM workflow where each stage returns different fields (e.g., stage 1 returns `target_column`, stage 2 returns `features`), prefer a single generic parser that passes through all fields rather than per-stage parsers.
+
+#### ✓ Pattern: Generic pass-through parser
+```python
+def parse_ml_step_response(raw: str) -> dict:
+    """Pass through all fields; each stage handler extracts what it needs."""
+    cleaned = strip_code_fences(raw)
+    parsed = json.loads(cleaned)
+    if "explanation" not in parsed:
+        parsed["explanation"] = ""  # safe default for the one universal field
+    return parsed
+```
+
+#### ❌ Anti-Pattern: Per-stage parsers
+```python
+# BAD: N parsers for N stages, each tightly coupled to the stage schema.
+# Adding a field to one stage requires finding the right parser to update.
+def parse_target_response(raw): ...
+def parse_feature_response(raw): ...
+def parse_model_response(raw): ...
+```
+
+**Why this matters:** Stage-specific parsers create tight coupling between the parser layer and the prompt schema. The generic parser delegates field extraction to the handler that knows the current stage — keeping the parse boundary thin and the stage-specific logic co-located with the state update.
+
+---
+
+### Prefer Deterministic Heuristics Over LLM Calls for Classifiable Inputs
+
+When the decision can be made reliably from data properties (e.g., dtype, unique value count, shape), use a pure heuristic function instead of an LLM call. Reserve LLM calls for tasks requiring judgment, natural language understanding, or domain reasoning.
+
+#### ✓ Pattern: Pure heuristic for problem type inference
+```python
+CLASSIFICATION_UNIQUE_VALUE_THRESHOLD = 10
+
+def infer_problem_type(df, target_column: str) -> str:
+    """Deterministic, fast, testable — no LLM call needed."""
+    col = df[target_column]
+    if col.dtype == "object" or col.dtype == "bool":
+        return "classification"
+    if col.nunique() <= CLASSIFICATION_UNIQUE_VALUE_THRESHOLD:
+        return "classification"
+    return "regression"
+```
+
+#### ❌ Anti-Pattern: LLM call for a deterministic decision
+```python
+# BAD: slow, non-deterministic, costs tokens, and the LLM might get it wrong
+prompt = f"Is column '{target}' with dtype {dtype} a classification or regression target?"
+result = call_llm(prompt, ...)
+```
+
+**Why this matters:** LLM calls add latency, cost, and non-determinism. For decisions that can be made from structured data properties with clear rules, a pure function is faster, cheaper, always testable, and never hallucinates.
+
+---
+
 ### Model Version Management
 
 When hardcoding LLM model identifiers in `llm.py`:
