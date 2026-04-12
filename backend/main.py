@@ -27,6 +27,7 @@ from executor import execute_code
 from llm import (
     build_chat_messages,
     build_chat_system_prompt,
+    build_retry_messages,
     call_llm_chat,
     generate_summary,
     parse_chat_response,
@@ -50,6 +51,10 @@ MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 # tokens of headroom for the system prompt + LLM response within a typical
 # 16k-token context window.
 CONVERSATION_HISTORY_MAX_TOKENS = 8000
+
+# Maximum number of retry attempts when the LLM-generated code fails, the LLM
+# API returns an error, or the response can't be parsed. 1 = original + 1 retry.
+MAX_CHAT_RETRIES = 1
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 
@@ -406,37 +411,23 @@ def chat(request: ChatRequest):
             request.session_id, len(request.question), len(truncated),
         )
 
-        try:
-            raw_response = call_llm_chat(
-                system_prompt, messages, session.api_key, session.provider, session.model,
-            )
-        except Exception as exc:
-            logger.error("LLM call failed during chat: %s", exc)
-            yield _sse_event("error", "LLM call failed: " + str(exc))
-            yield _sse_event("done", "")
-            return
+        parsed, exec_result, last_error = _attempt_chat_with_retries(
+            system_prompt, messages, request.question, truncated, session,
+        )
 
-        parsed = parse_chat_response(raw_response)
-
-        if "error" in parsed:
-            yield _sse_event("error", parsed["error"])
+        if parsed is None:
+            yield _sse_event("error", last_error)
             yield _sse_event("done", "")
             return
 
         yield _sse_event("explanation", parsed["explanation"])
 
-        exec_result: dict | None = None
-        if parsed.get("code"):
-            exec_result = execute_code(parsed["code"], session.exec_namespace)
-
-            if exec_result["error"]:
-                yield _sse_event("error", exec_result["error"])
-            else:
-                result_payload = json.dumps({
-                    "stdout": exec_result["stdout"],
-                    "figures": exec_result["figures"],
-                })
-                yield _sse_event("result", result_payload)
+        if exec_result is not None and exec_result["error"] is None:
+            result_payload = json.dumps({
+                "stdout": exec_result["stdout"],
+                "figures": exec_result["figures"],
+            })
+            yield _sse_event("result", result_payload)
 
         if parsed.get("cleaning_suggestions"):
             yield _sse_event(
@@ -462,6 +453,90 @@ def chat(request: ChatRequest):
         yield _sse_event("done", "")
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+def _single_chat_attempt(
+    system_prompt: str,
+    messages: list,
+    session,
+) -> tuple[dict | None, dict | None, str | None]:
+    """
+    Run one LLM call → parse → execute cycle.
+
+    Returns (parsed, exec_result, error_string):
+    - On success: (parsed_dict, exec_result_dict_or_None, None)
+    - On failure: (None, None, error_string)
+    The error_string describes what went wrong (LLM API, parse, or execution).
+    """
+    try:
+        raw_response = call_llm_chat(
+            system_prompt, messages, session.api_key, session.provider, session.model,
+        )
+    except Exception as exc:
+        logger.error("LLM call failed during chat: %s", exc)
+        return None, None, "LLM call failed: " + str(exc)
+
+    parsed = parse_chat_response(raw_response)
+
+    if "error" in parsed:
+        return None, None, parsed["error"]
+
+    exec_result: dict | None = None
+    if parsed.get("code"):
+        exec_result = execute_code(parsed["code"], session.exec_namespace)
+        if exec_result["error"]:
+            return parsed, exec_result, exec_result["error"]
+
+    return parsed, exec_result, None
+
+
+def _attempt_chat_with_retries(
+    system_prompt: str,
+    messages: list,
+    original_question: str,
+    conversation_history: list,
+    session,
+) -> tuple[dict | None, dict | None, str]:
+    """
+    Try the LLM call → parse → execute cycle, retrying up to MAX_CHAT_RETRIES
+    times on any failure (LLM API error, JSON parse error, execution error,
+    or timeout).
+
+    Returns (parsed, exec_result, last_error):
+    - On success: (parsed_dict, exec_result_or_None, "")
+    - After exhausting retries: (None, None, friendly_error_message)
+    """
+    parsed, exec_result, error = _single_chat_attempt(
+        system_prompt, messages, session,
+    )
+
+    if error is None:
+        return parsed, exec_result, ""
+
+    # Retry loop — build retry context and try again.
+    for attempt in range(MAX_CHAT_RETRIES):
+        failed_code = parsed["code"] if parsed and parsed.get("code") else ""
+        logger.info(
+            "Chat attempt failed (retry %d/%d): %s",
+            attempt + 1, MAX_CHAT_RETRIES, error,
+        )
+
+        retry_messages = build_retry_messages(
+            original_question=original_question,
+            failed_code=failed_code,
+            error_traceback=error,
+            conversation_history=conversation_history,
+        )
+
+        parsed, exec_result, error = _single_chat_attempt(
+            system_prompt, retry_messages, session,
+        )
+
+        if error is None:
+            return parsed, exec_result, ""
+
+    logger.warning("Chat failed after all retries: %s", error)
+    return None, None, error
 
 
 def _sse_event(event_type: str, data: str) -> str:

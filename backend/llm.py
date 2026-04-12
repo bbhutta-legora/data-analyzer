@@ -223,6 +223,77 @@ def build_chat_messages(question: str, conversation_history: list) -> list:
     return messages
 
 
+# ── Retry prompt construction ───────────────────────────────────────────────
+
+TIMEOUT_RETRY_GUIDANCE = (
+    "The code timed out. Generate simpler, faster code that avoids "
+    "expensive operations (large loops, heavy computations). "
+    "Consider sampling or limiting data size.\n\n"
+)
+
+
+def _build_retry_prompt(
+    original_question: str,
+    failed_code: str,
+    error_traceback: str,
+) -> str:
+    """
+    Construct the retry prompt from the original question, failed code, and error.
+
+    Uses string concatenation — not str.format() — so curly braces in user
+    questions or error tracebacks (e.g. KeyError: '{col}') don't cause
+    KeyError (framework_patterns.md).
+    """
+    is_timeout = "timed out" in error_traceback.lower()
+    extra_guidance = TIMEOUT_RETRY_GUIDANCE if is_timeout else ""
+
+    return (
+        'The user asked: """' + original_question + '"""\n'
+        "\n"
+        "You previously generated the following code, but it failed.\n"
+        "\n"
+        "Code:\n"
+        "```\n"
+        + failed_code + "\n"
+        "```\n"
+        "\n"
+        "Error:\n"
+        "```\n"
+        + error_traceback + "\n"
+        "```\n"
+        "\n"
+        + extra_guidance
+        + "Please fix the code and try again. Return valid JSON in the same format as before."
+    )
+
+
+def build_retry_messages(
+    original_question: str,
+    failed_code: str,
+    error_traceback: str,
+    conversation_history: list | None = None,
+) -> list:
+    """
+    Build the messages array for a retry LLM call after code failure.
+
+    Includes the conversation history (if any) plus a user message containing
+    the original question, the code that failed, and the error traceback.
+    For timeout errors, includes guidance to generate simpler/faster code.
+
+    Pure function — no I/O, no side effects. Returns a new list.
+
+    Failure modes: none — always returns a non-empty list.
+    """
+    if conversation_history is None:
+        conversation_history = []
+
+    retry_content = _build_retry_prompt(original_question, failed_code, error_traceback)
+
+    messages = list(conversation_history)
+    messages.append({"role": "user", "content": retry_content})
+    return messages
+
+
 def parse_chat_response(raw: str) -> dict:
     """
     Parse an LLM chat response into a structured dict.
