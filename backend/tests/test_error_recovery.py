@@ -383,11 +383,11 @@ def test_code_history_records_retry_code_on_success():
     # should contain the retry's code, not the first attempt's.
     session_id = create_session_with_data()
 
-    FIRST_RESPONSE = json.dumps({
+    first_response = json.dumps({
         "code": "print(first_attempt_code)",
         "explanation": "First attempt.",
     })
-    RETRY_RESPONSE = json.dumps({
+    retry_response = json.dumps({
         "code": "print(retry_attempt_code)",
         "explanation": "Retry attempt.",
     })
@@ -397,8 +397,8 @@ def test_code_history_records_retry_code_on_success():
     def mock_call_llm_chat(*args, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            return FIRST_RESPONSE
-        return RETRY_RESPONSE
+            return first_response
+        return retry_response
 
     exec_count = {"n": 0}
 
@@ -435,7 +435,7 @@ def test_retry_returns_empty_code_no_error_no_loop():
     # - NOT re-enter the retry path (no infinite loop)
     session_id = create_session_with_data()
 
-    EMPTY_CODE_RESPONSE = json.dumps({
+    empty_code_response = json.dumps({
         "code": "",
         "explanation": "I can't do that analysis",
     })
@@ -446,7 +446,7 @@ def test_retry_returns_empty_code_no_error_no_loop():
         call_count["n"] += 1
         if call_count["n"] == 1:
             return MOCK_LLM_RESPONSE_GOOD
-        return EMPTY_CODE_RESPONSE
+        return empty_code_response
 
     exec_count = {"n": 0}
 
@@ -525,7 +525,7 @@ def test_error_traceback_with_curly_braces_does_not_crash():
     # so this should be safe. This test guards against future refactors.
     session_id = create_session_with_data()
 
-    CURLY_BRACE_ERROR = {
+    curly_brace_error = {
         "stdout": "",
         "figures": [],
         "error": "KeyError: '{column_name}'",
@@ -545,7 +545,7 @@ def test_error_traceback_with_curly_braces_does_not_crash():
     def mock_execute_code(*args, **kwargs):
         exec_count["n"] += 1
         if exec_count["n"] == 1:
-            return CURLY_BRACE_ERROR
+            return curly_brace_error
         return MOCK_EXECUTION_SUCCESS
 
     with patch("main.call_llm_chat", side_effect=mock_call_llm_chat), \
