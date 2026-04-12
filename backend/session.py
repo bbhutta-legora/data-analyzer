@@ -51,6 +51,15 @@ class Session:
     # model are used. Valid values are defined in providers.py.
     provider: str = ""
     model: str = ""
+    # ML workflow state (PRD #5 — Guided ML). Tracks progress through the
+    # multi-stage wizard: target → features → preprocessing → model → training → explanation.
+    # Each field is set when its corresponding stage completes; a restart to an
+    # earlier stage resets all subsequent fields to None.
+    ml_stage: Optional[str] = None
+    ml_target_column: Optional[str] = None
+    ml_features: Optional[list[str]] = None
+    ml_problem_type: Optional[str] = None
+    ml_model_choice: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Libraries come from sandbox_libraries.py — the single source of truth shared

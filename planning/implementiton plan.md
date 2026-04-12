@@ -27,7 +27,7 @@
 | 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A | ✅ Done |
 | 10 | Data cleaning | Vertical | Medium | 9 | #4 Data cleaning | |
 | 11 | Error recovery | Vertical | Medium | 9 | #6 Error recovery | |
-| 12 | Guided ML backend | Vertical | High | 8 | #5 Guided ML | |
+| 12 | Guided ML backend | Vertical | High | 8 | #5 Guided ML | ✅ Done |
 | 13 | Guided ML frontend | Vertical | Medium | 12, 9 | #5 Guided ML | |
 | 14 | Export | Vertical | Medium | 9 | #7 Export | |
 | 15 | Help | Vertical | Low | 5 | #9 Help | ✅ Done |
@@ -1478,7 +1478,7 @@ Manual verification: Ask a question that's likely to produce a code error (e.g.,
 
 ---
 
-### Step 12 — Guided ML Backend
+### Step 12 — Guided ML Backend ✅ Done
 
 **Goal:** Build the backend prompt chains that drive the step-by-step ML workflow: target selection, feature selection, preprocessing, model selection, training/evaluation, and explanation. Each step produces a specific prompt and expects a structured response.
 
