@@ -313,6 +313,98 @@ async def upload(file: UploadFile):
 
 ---
 
+## Python / Subprocess Execution
+
+### Use Processes, Not Threads, for Untrusted Code
+
+When executing LLM-generated or user-provided code that may hang (infinite loops, blocking I/O), always run it in a separate **process** — never a thread.
+
+A thread shares the GIL and Python provides no mechanism to kill it. An infinite loop in a thread burns CPU forever and blocks process exit (including pytest teardown). A process can be killed instantly with `process.kill()`.
+
+#### ❌ Anti-Pattern: Thread-based execution with timeout
+```python
+# BAD: if the code hangs, the daemon thread keeps running and blocks pytest exit
+thread = threading.Thread(target=run_code, daemon=True)
+thread.start()
+finished.wait(timeout=30)
+if not finished.is_set():
+    return {"error": "timed out"}  # Thread is still running, can't kill it
+```
+
+#### ✓ Pattern: Process-based execution with kill
+```python
+# GOOD: child process is killed cleanly on timeout
+process = multiprocessing.Process(target=worker, args=(code, df_pickle, conn), daemon=True)
+process.start()
+process.join(timeout=30)
+if process.is_alive():
+    process.kill()   # OS terminates the child immediately
+    process.join()
+    return {"error": "Code execution timed out"}
+```
+
+**Why this matters:** This surfaced during executor.py development — `ThreadPoolExecutor` and daemon threads both left zombie threads running `while True: pass` that blocked pytest for 60+ seconds. Switching to `multiprocessing.Process` with `process.kill()` gave clean 3-second test runs.
+
+---
+
+### Prefer multiprocessing.Process Over ProcessPoolExecutor for Single-Shot Execution
+
+`ProcessPoolExecutor` requires OS semaphores (`os.sysconf("SC_SEM_NSEMS_MAX")`) that sandboxed or restricted environments may block. Raw `multiprocessing.Process` + `Pipe` doesn't need semaphores and gives you direct control over the child lifecycle.
+
+#### ❌ Anti-Pattern: ProcessPoolExecutor for one-off execution
+```python
+# BAD: requires semaphores; fails in sandboxed environments
+with ProcessPoolExecutor(max_workers=1) as pool:
+    future = pool.submit(worker, code, df_pickle)
+    result = future.result(timeout=30)
+```
+
+#### ✓ Pattern: Direct Process + Pipe
+```python
+# GOOD: no semaphore dependency; works in all environments
+parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
+proc = multiprocessing.Process(target=worker, args=(code, df_pickle, child_conn))
+proc.start()
+child_conn.close()
+proc.join(timeout=30)
+if proc.is_alive():
+    proc.kill()
+    proc.join()
+```
+
+**Why this matters:** `ProcessPoolExecutor` failed with `PermissionError` on `os.sysconf` inside Cursor's sandbox. The pool abstraction is designed for reusable worker pools, not single-shot subprocess execution.
+
+---
+
+## Python / Testing
+
+### Match Test Assertions to Exact Error Wording
+
+When a test checks an error message string, use the exact wording from the implementation — or better, use a shared constant for the message so the test and implementation can't drift.
+
+#### ❌ Anti-Pattern: Approximate string matching
+```python
+# In executor.py:
+public_result["error"] = "Code execution timed out"
+
+# In test — "timeout" (one word) is NOT in "timed out" (two words)
+assert "timeout" in result["error"].lower()  # FAILS
+```
+
+#### ✓ Pattern: Exact wording or shared constant
+```python
+# GOOD: match the exact wording
+assert "timed out" in result["error"].lower()
+
+# BETTER: shared constant
+TIMEOUT_ERROR_MESSAGE = "Code execution timed out"
+# used in both executor.py and test_executor.py
+```
+
+**Why this matters:** A near-miss in wording wastes a full debugging cycle. The developer assumes the timeout mechanism is broken when actually the test assertion is just checking for the wrong substring.
+
+---
+
 ## Python / asyncio
 
 ### asyncio.run() Requires a Coroutine
