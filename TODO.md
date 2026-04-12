@@ -38,6 +38,7 @@
 
 ## Harness Document Updates
 - [ ] Update implementation_plan_principles.md to require README.md as a scaffolding step (gap #1 — not a CI concern, belongs in project setup)
+- [ ] Require full markdown wireframes as part of the PRD — every user-facing screen must have a text-based wireframe before implementation begins
 
 ## General Agent Pattern
 - [ ] Add convergent multi-pass review pattern to harness: agent re-prompts the same review with an accumulating exclusion list until 0 new findings returned. LLM finds issues (structured JSON array), code decides when to stop (len == 0), adversarial framing ("find what the previous pass missed"). Max 5 passes safety cap. Applies to any coding agent review task.
