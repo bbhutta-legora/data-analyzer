@@ -14,23 +14,23 @@
 
 ## Summary
 
-| Step | Name | Phase | Complexity | Depends On | PRD Capability |
-|------|------|-------|------------|------------|----------------|
-| 1 | Project scaffolding + backend setup | Foundation | Low | — | — |
-| 2 | Session management | Foundation | Medium | 1 | — |
-| 3 | Sandboxed executor | Foundation | High | 1 | — |
-| 4 | File upload endpoint | Foundation | Medium | 2, 3 | #1 Upload |
-| 5 | Frontend scaffolding | Foundation | Low | 1 | — |
-| 6 | BYOK setup | Vertical | Low | 4, 5 | #8 BYOK |
-| 7 | Initial summary | Vertical | Medium | 6 | #2 Initial summary |
-| 8 | Q&A backend | Vertical | High | 7 | #3 Conversational Q&A |
-| 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A |
-| 10 | Data cleaning | Vertical | Medium | 9 | #4 Data cleaning |
-| 11 | Error recovery | Vertical | Medium | 9 | #6 Error recovery |
-| 12 | Guided ML backend | Vertical | High | 8 | #5 Guided ML |
-| 13 | Guided ML frontend | Vertical | Medium | 12, 9 | #5 Guided ML |
-| 14 | Export | Vertical | Medium | 9 | #7 Export |
-| 15 | Help | Vertical | Low | 5 | #9 Help |
+| Step | Name | Phase | Complexity | Depends On | PRD Capability | Status |
+|------|------|-------|------------|------------|----------------|--------|
+| 1 | Project scaffolding + backend setup | Foundation | Low | — | — | ✅ Done |
+| 2 | Session management | Foundation | Medium | 1 | — | ✅ Done |
+| 3 | Sandboxed executor | Foundation | High | 1 | — | ✅ Done |
+| 4 | File upload endpoint | Foundation | Medium | 2, 3 | #1 Upload | ✅ Done |
+| 5 | Frontend scaffolding | Foundation | Low | 1 | — | ✅ Done |
+| 6 | BYOK setup | Vertical | Low | 4, 5 | #8 BYOK | |
+| 7 | Initial summary | Vertical | Medium | 6 | #2 Initial summary | |
+| 8 | Q&A backend | Vertical | High | 7 | #3 Conversational Q&A | |
+| 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A | |
+| 10 | Data cleaning | Vertical | Medium | 9 | #4 Data cleaning | |
+| 11 | Error recovery | Vertical | Medium | 9 | #6 Error recovery | |
+| 12 | Guided ML backend | Vertical | High | 8 | #5 Guided ML | |
+| 13 | Guided ML frontend | Vertical | Medium | 12, 9 | #5 Guided ML | |
+| 14 | Export | Vertical | Medium | 9 | #7 Export | |
+| 15 | Help | Vertical | Low | 5 | #9 Help | |
 
 ---
 
