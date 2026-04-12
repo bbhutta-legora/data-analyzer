@@ -648,3 +648,115 @@ cd /worktree/backend
 source venv/bin/activate
 pytest tests/ -v
 ```
+
+---
+
+## Vitest / Frontend Testing
+
+### `clearAllMocks()` Does Not Flush `mockImplementationOnce` Queues — Use `mockReset()`
+
+`vi.clearAllMocks()` resets call counts and recorded arguments, but leaves any queued `mockImplementationOnce` entries intact. If an earlier test queues more one-time implementations than it consumes (e.g., because it queued 5 but only 1 was called), the leftover entries bleed into subsequent tests and are consumed there — silently changing behavior.
+
+#### ❌ Anti-Pattern: `clearAllMocks()` in `beforeEach` when using `mockImplementationOnce`
+
+```typescript
+beforeEach(() => {
+  vi.clearAllMocks(); // Clears call history but NOT the implementation queue
+});
+
+test("feature A", () => {
+  vi.mocked(sendMlStep).mockImplementationOnce(hangingPromise); // queued but never consumed
+  // ...test only partially exercises the mock...
+});
+
+test("feature B", () => {
+  vi.mocked(sendMlStep).mockImplementationOnce(successImpl); // consumed as 2nd call
+  // But sendMlStep's FIRST call gets the leftover hangingPromise from feature A
+  // → test silently hangs or behaves wrong
+});
+```
+
+#### ✓ Pattern: `mockReset()` per test when using `mockImplementationOnce`
+
+```typescript
+beforeEach(() => {
+  vi.mocked(sendMlStep).mockReset(); // Clears both call history AND the implementation queue
+});
+```
+
+Place the `mockReset()` call in a top-level `beforeEach` (outside all `describe` blocks) so it applies to every test regardless of grouping.
+
+**Why this matters:** This is a non-obvious Vitest quirk that produces flaky, order-dependent test failures. The error manifests as a test that passes in isolation but fails when the full suite runs. The real culprit is always a test earlier in the file that queued but didn't consume all its one-time mocks.
+
+---
+
+### Async Error Guard in SSE Callbacks: Use Closure Variables, Not React State
+
+When SSE streams an error and then a done event in sequence (within the same async call), you cannot use React state (`useState`) to prevent the `onDone` handler from advancing the phase. State setters are asynchronous — the updated value won't be visible to the `onDone` closure that runs in the same microtask.
+
+#### ❌ Anti-Pattern: Relying on React state to guard `onDone`
+
+```typescript
+const [hadError, setHadError] = useState(false);
+
+sendMlStep(sessionId, stage, input, {
+  onError: (msg) => {
+    setHadError(true);       // schedules a re-render, does NOT update hadError NOW
+    setStageError(msg);
+    setIsStageStreaming(false);
+  },
+  onDone: () => {
+    if (hadError) return;    // WRONG: hadError is still false — stale closure
+    setPhase("features");    // Phase advances even after an error
+  },
+});
+```
+
+#### ✓ Pattern: Closure variable initialized before the call
+
+```typescript
+let hadError = false;  // plain JS variable — readable synchronously within the closure
+
+sendMlStep(sessionId, stage, input, {
+  onError: (msg) => {
+    hadError = true;          // immediately visible to any code in this closure
+    setStageError(msg);
+    setIsStageStreaming(false);
+  },
+  onDone: () => {
+    if (hadError) return;     // CORRECT: reads the updated value
+    setPhase("features");
+  },
+});
+```
+
+The same pattern applies inside `useEffect` async sequences where multiple `await sendMlStep(...)` calls share a single `hadError` guard.
+
+**Why this matters:** This class of bug causes a phase transition to fire even when the user has seen an error message, leaving the UI in an inconsistent state. It's hard to catch in tests unless the mock explicitly calls `onError` followed by `onDone` in sequence (which real SSE streams do).
+
+---
+
+### Distinct Text for Card Titles vs Body Text Prevents `getByText` Ambiguity
+
+When a component has a card title and body text that share the same substring, `screen.getByText(/substring/i)` throws "Found multiple elements with text matching..." and the test fails. This is especially common in wizard-style UIs where a card heading ("Training Model") echoes the loading message ("Training model...").
+
+#### ❌ Anti-Pattern: Title and body sharing a substring
+
+```tsx
+// Card title: "Training Model"
+// Body text:  "Training model..."
+// Both match /training model/i → getByText throws
+screen.getByText(/training model/i); // Fails: multiple matches
+```
+
+#### ✓ Pattern: Ensure titles and status messages are textually distinct
+
+```tsx
+// Card title: "Running Training"   ← distinct from body
+// Body text:  "Training model..."
+screen.getByText(/running training/i); // Unique match
+```
+
+The same collision can occur between completed-phase summary labels and results explanation text (e.g., "Training complete" appearing in both the collapsed summary and the LLM explanation returned by the mock). Use distinct phrasing for summary labels: prefer `"Training: finished"` over `"Training complete"`.
+
+**Why this matters:** These collisions are invisible until tests run — the component renders correctly, but test queries fail with cryptic errors. Establishing distinct naming conventions for card titles, status messages, and completed-phase summaries prevents a debugging cycle that looks like a state bug but is actually a text uniqueness problem.
