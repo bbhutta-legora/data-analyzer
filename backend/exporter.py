@@ -72,8 +72,16 @@ def _make_header_cell() -> dict:
 
 
 def _make_data_loading_cell(filename: str) -> dict:
-    """Create a code cell that loads the dataset from the uploaded file."""
-    return _make_code_cell(f'df = pd.read_csv("{filename}")')
+    """Create a code cell that loads the dataset from the uploaded file.
+
+    Handles filenames containing quotes, backslashes, or other special characters
+    by escaping them before embedding in the Python source string.
+    Falls back to "data.csv" when the filename is empty.
+    """
+    safe_name = filename if filename else "data.csv"
+    # Escape backslashes first, then single quotes, for embedding in a '-delimited string.
+    escaped = safe_name.replace("\\", "\\\\").replace("'", "\\'")
+    return _make_code_cell(f"df = pd.read_csv('{escaped}')")
 
 
 def _notebook_wrapper(cells: list[dict]) -> dict:

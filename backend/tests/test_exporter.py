@@ -171,3 +171,87 @@ def test_export_route_response_is_valid_notebook_json(session_with_history):
     notebook = response.json()
     assert notebook["nbformat"] == 4
     assert len(notebook["cells"]) > 0
+
+
+# ── Edge-case tests (audit gaps) ────────────────────────────────────────────
+
+
+def test_empty_filename_uses_fallback():
+    """Empty original_filename → data-loading cell uses 'data.csv', not an empty string."""
+    notebook = build_notebook([], "")
+    loading_cell = notebook["cells"][1]
+    source = "".join(loading_cell["source"])
+    assert "data.csv" in source
+    assert "read_csv('')" not in source
+
+
+def test_filename_with_spaces_produces_valid_python():
+    """Filename with spaces → data-loading cell produces valid Python."""
+    notebook = build_notebook([], "my data file.csv")
+    loading_cell = notebook["cells"][1]
+    source = "".join(loading_cell["source"])
+    assert "my data file.csv" in source
+    # Verify it's syntactically valid Python
+    compile(source, "<test>", "exec")
+
+
+def test_filename_with_quotes_produces_valid_python():
+    """Filename with double and single quotes → data-loading cell produces valid Python."""
+    notebook = build_notebook([], 'data "v2".csv')
+    loading_cell = notebook["cells"][1]
+    source = "".join(loading_cell["source"])
+    compile(source, "<test>", "exec")
+    assert "v2" in source
+
+    # Also test single quotes
+    notebook2 = build_notebook([], "data 'v3'.csv")
+    loading_cell2 = notebook2["cells"][1]
+    source2 = "".join(loading_cell2["source"])
+    compile(source2, "<test>", "exec")
+    assert "v3" in source2
+
+
+def test_code_history_entry_with_empty_explanation():
+    """Entry with empty explanation → only code cell produced, no crash."""
+    history = [{"code": "print(1)", "explanation": ""}]
+    notebook = build_notebook(history, "data.csv")
+    # 2 base cells + 1 code cell (no markdown because explanation is empty)
+    assert len(notebook["cells"]) == 3
+    assert notebook["cells"][2]["cell_type"] == "code"
+
+
+def test_code_history_entry_with_missing_explanation_key():
+    """Entry missing 'explanation' key entirely → doesn't crash."""
+    history = [{"code": "print(1)"}]
+    notebook = build_notebook(history, "data.csv")
+    # 2 base cells + 1 code cell
+    assert len(notebook["cells"]) == 3
+    assert notebook["cells"][2]["cell_type"] == "code"
+
+
+def test_code_with_backslashes_and_unicode_survives_json_roundtrip():
+    """Code with backslashes and unicode → survives JSON serialize/deserialize."""
+    code = 'path = "C:\\\\Users\\\\data"\nprint("héllo 世界")'
+    history = [{"code": code, "explanation": "Paths and unicode."}]
+    notebook = build_notebook(history, "data.csv")
+    roundtripped = json.loads(json.dumps(notebook))
+    code_cell = roundtripped["cells"][3]  # index 0=header, 1=loading, 2=md, 3=code
+    assert "".join(code_cell["source"]) == code
+
+
+def test_empty_code_history_returns_valid_notebook_with_header_and_loading():
+    """Endpoint with empty code_history → returns valid notebook with header + data-loading cells."""
+    df = pd.DataFrame({"x": [1]})
+    sid = session_store.create({"test": df}, original_filename="empty.csv")
+    # Ensure code_history is empty (it should be by default)
+    session = session_store.get(sid)
+    assert session.code_history == []
+
+    response = client.get(f"/api/export/{sid}")
+    assert response.status_code == 200
+    notebook = response.json()
+    assert notebook["nbformat"] == 4
+    assert len(notebook["cells"]) == 2
+    assert notebook["cells"][0]["cell_type"] == "code"
+    assert notebook["cells"][1]["cell_type"] == "code"
+    assert "empty.csv" in "".join(notebook["cells"][1]["source"])

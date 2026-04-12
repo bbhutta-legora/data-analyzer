@@ -36,9 +36,15 @@ export function ChatPanel() {
     setInputValue("");
   }
 
+  const [exportError, setExportError] = useState<string | null>(null);
+
   function handleExport() {
-    if (!sessionId) return;
-    exportNotebook(sessionId);
+    if (!sessionId || isStreaming) return;
+    setExportError(null);
+    exportNotebook(sessionId).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : "Export failed.";
+      setExportError(message);
+    });
   }
 
   return (
@@ -57,21 +63,26 @@ export function ChatPanel() {
         <button
           type="button"
           onClick={handleExport}
-          disabled={!sessionId}
+          disabled={!sessionId || isStreaming}
           aria-label="Export Notebook"
           style={{
             padding: "6px 14px",
             fontSize: 13,
             fontWeight: 500,
-            background: sessionId ? "#1a73e8" : "#d1d5db",
+            background: sessionId && !isStreaming ? "#1a73e8" : "#d1d5db",
             color: "#fff",
             border: "none",
             borderRadius: 6,
-            cursor: sessionId ? "pointer" : "not-allowed",
+            cursor: sessionId && !isStreaming ? "pointer" : "not-allowed",
           }}
         >
           Export Notebook
         </button>
+        {exportError && (
+          <span role="alert" style={{ color: "#dc2626", fontSize: 13, marginLeft: 8 }}>
+            {exportError}
+          </span>
+        )}
       </div>
 
       {/* Scrollable message area */}

@@ -152,16 +152,46 @@ export async function uploadFile(
 // ── Step 14: Export Notebook ──────────────────────────────────────────────────
 
 /**
- * Trigger a browser download of the session's Jupyter notebook export.
+ * Download the session's Jupyter notebook export.
  *
- * Uses window.open() instead of apiFetch because the endpoint returns a binary
- * file download (not JSON). The browser handles the Content-Disposition header
- * to save the file with the correct filename.
+ * Uses fetch instead of window.open() so we can detect HTTP errors (404, 500)
+ * and surface them to the user rather than showing raw JSON in a new tab.
+ *
+ * On success: creates a Blob from the response, generates an object URL,
+ * triggers a download via a temporary <a> element, then cleans up.
+ *
+ * On failure: rejects with an Error describing the problem.
  *
  * PRD ref: #7 (Export)
  */
-export function exportNotebook(sessionId: string): void {
-  window.open(`${API_BASE}/api/export/${sessionId}`, "_blank");
+export async function exportNotebook(sessionId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/export/${sessionId}`);
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({
+      detail: response.statusText,
+    }));
+    throw new Error(body.detail || `Export failed with status ${response.status}`);
+  }
+
+  const blob = await response.blob();
+
+  // Extract filename from Content-Disposition header, fall back to a default.
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+  const filename = filenameMatch ? filenameMatch[1] : "notebook_analysis.ipynb";
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 // ── Step 9: Chat SSE Client ────────────────────────────────────────────────
