@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { sendChatMessage } from "../api";
+import { sendChatMessage, exportNotebook } from "../api";
 import { DataSummary } from "./DataSummary";
 import { MessageBubble } from "./MessageBubble";
 
@@ -36,8 +36,55 @@ export function ChatPanel() {
     setInputValue("");
   }
 
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  function handleExport() {
+    if (!sessionId || isStreaming) return;
+    setExportError(null);
+    exportNotebook(sessionId).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : "Export failed.";
+      setExportError(message);
+    });
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      {/* Header bar with export button */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          padding: "8px 24px",
+          borderBottom: "1px solid #e5e7eb",
+          background: "#f9fafb",
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={!sessionId || isStreaming}
+          aria-label="Export Notebook"
+          style={{
+            padding: "6px 14px",
+            fontSize: 13,
+            fontWeight: 500,
+            background: sessionId && !isStreaming ? "#1a73e8" : "#d1d5db",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            cursor: sessionId && !isStreaming ? "pointer" : "not-allowed",
+          }}
+        >
+          Export Notebook
+        </button>
+        {exportError && (
+          <span role="alert" style={{ color: "#dc2626", fontSize: 13, marginLeft: 8 }}>
+            {exportError}
+          </span>
+        )}
+      </div>
+
       {/* Scrollable message area */}
       <div
         ref={scrollRef}

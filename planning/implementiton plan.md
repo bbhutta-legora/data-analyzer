@@ -1646,7 +1646,7 @@ Manual verification: Upload a dataset, say "I want to predict the price column."
 
 ---
 
-### Step 14 — Export
+### Step 14 — Export ✅ Done
 
 **Goal:** Build the notebook exporter that converts a session's code history into a downloadable Jupyter notebook (`.ipynb`), and add a download button to the chat UI.
 

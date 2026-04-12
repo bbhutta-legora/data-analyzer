@@ -20,10 +20,11 @@ import pathlib
 import pandas as pd
 from fastapi import FastAPI, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from executor import execute_code
+from exporter import build_notebook
 from llm import (
     build_chat_messages,
     build_chat_system_prompt,
@@ -341,6 +342,7 @@ def upload_file(
 
     session_id = session_store.create(
         dataframes, api_key=api_key, provider=provider, model=model,
+        original_filename=filename,
     )
     datasets = build_dataset_metadata(dataframes)
 
@@ -538,6 +540,48 @@ def _attempt_chat_with_retries(
     logger.warning("Chat failed after all retries: %s", error)
     return None, None, error
 
+
+# ── Export endpoint (Step 14) ────────────────────────────────────────────────
+
+
+@app.get("/api/export/{session_id}")
+def export_notebook(session_id: str):
+    """
+    Build a Jupyter notebook from the session's code history and return it
+    as a downloadable .ipynb file.
+
+    The notebook includes a header cell with library imports, a data-loading
+    cell referencing the original uploaded file, and for each analysis turn
+    a markdown cell with the explanation followed by a code cell with the code.
+
+    PRD ref: #7 (Export)
+    Architecture ref: "GET /api/export/{session_id}" in planning/architecture.md
+    """
+    session = session_store.get(session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "session_not_found",
+                "detail": "Session not found or has expired.",
+            },
+        )
+
+    notebook = build_notebook(session.code_history, session.original_filename)
+
+    # Derive download filename from the original uploaded file.
+    # e.g. "sales.csv" → "sales_analysis.ipynb"
+    stem = pathlib.Path(session.original_filename).stem or "notebook"
+    download_filename = f"{stem}_analysis.ipynb"
+
+    notebook_json = json.dumps(notebook, indent=1)
+    return Response(
+        content=notebook_json,
+        media_type="application/x-ipynb+json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_filename}"',
+        },
+    )
 
 def _sse_event(event_type: str, data: str) -> str:
     """Format a single SSE event string with the standard event + data fields."""

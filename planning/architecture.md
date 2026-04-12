@@ -59,6 +59,7 @@ backend/
 - `conversation_history`: list of `{role, content}` messages for LLM context
 - `code_history`: list of `{code, explanation, result}` entries for notebook export
 - `exec_namespace`: the Python namespace dict used by the sandbox
+- `original_filename`: the uploaded file's name (e.g. `"sales.csv"`); used by `exporter.py` for the data-loading cell and the download filename
 - `api_key`: the user's LLM API key (held in memory only)
 - `provider`: the provider the user selected (`"openai"` or `"anthropic"`)
 - `model`: the specific model the user selected (e.g. `"gpt-5.4-mini"`)
