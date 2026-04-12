@@ -18,7 +18,7 @@ The current chat flow is strictly single-attempt:
 7. Append to `conversation_history` and `code_history` (lines 447-460)
 8. Yield SSE `done`
 
-The retry logic needs to intercept at step 5: when `exec_result["error"]` is truthy, instead of immediately yielding an error to the frontend, re-prompt the LLM with error context and try again.
+The retry logic needs to intercept at three failure points: step 2 (LLM API errors), step 3 (JSON parse failures), and step 5 (execution errors/timeouts). Instead of immediately yielding an error to the frontend, re-prompt the LLM and try again.
 
 ### Backend: `llm.py` — LLM call functions
 
@@ -63,7 +63,7 @@ The retry logic needs to intercept at step 5: when `exec_result["error"]` is tru
 
 | Phase | Name | What happens |
 |-------|------|-------------|
-| A | Test spec | Present behaviors and test cases for error recovery to the user for review. Cover: retry on first failure, success after retry, double failure returns friendly error, retry prompt includes error context, retryable vs. non-retryable errors, SSE "retrying" event (if adopted), frontend friendly error display. Wait for confirmation. |
+| A | Test spec | Present behaviors and test cases for error recovery to the user for review. Cover: retry on first failure (all error types), success after retry, double failure returns friendly error, retry prompt includes error context, timeout retry asks for simpler code, frontend friendly error with collapsible detail. Wait for confirmation. |
 | B | Tests | Write `backend/tests/test_error_recovery.py` and any frontend test updates. Run them, confirm all fail for the right reasons. |
 | C | Implementation | Add retry logic to `main.py`'s `event_generator` (or extract into a helper in `llm.py`). Add `build_retry_messages()` to `llm.py`. Update `MessageBubble.tsx` for friendly error text. Optionally add a `retrying` SSE event type. |
 | D | Verification | Break-the-implementation check: disable the retry path and verify the retry-specific tests fail while existing tests still pass. Self-audit summary. Present for user confirmation. |
@@ -77,12 +77,12 @@ No Phase A0 (wireframes) is needed. The frontend change is purely behavioral —
 ### Files to modify
 
 1. **`backend/main.py`** — modify `event_generator` in the `/api/chat` endpoint:
-   - After `execute_code` returns an error, instead of immediately yielding an SSE `error`, enter the retry path.
-   - Optionally yield an SSE `retrying` event so the frontend can show "Retrying..." (see open question below).
-   - Build retry messages that include the failed code and traceback, call `call_llm_chat` again, parse, execute again.
+   - Wrap the LLM call → parse → execute sequence in a retry loop (max 1 retry).
+   - On any failure (LLM API error, JSON parse error, execution error, or timeout), build retry messages with error context and try again.
+   - For timeout retries, include guidance in the retry prompt to generate simpler/faster code.
    - If retry succeeds, yield `explanation` (updated) + `result` as normal.
    - If retry fails, yield `error` with a friendly message.
-   - Update `conversation_history` and `code_history` to reflect the final outcome (not intermediate failures).
+   - Update `conversation_history` and `code_history` to reflect the final outcome only (not intermediate failures).
 
 2. **`backend/llm.py`** — add a pure function for building the retry prompt:
    - `build_retry_messages(original_question, failed_code, error_traceback, conversation_history)` — returns a messages list where the last user message includes the original question, the code that failed, and the error traceback, instructing the LLM to fix the code.
@@ -93,12 +93,8 @@ No Phase A0 (wireframes) is needed. The frontend change is purely behavioral —
 4. **`backend/tests/test_chat.py`** — update `test_chat_endpoint_streams_error_on_execution_failure` (line 365). After Step 11, a single execution failure triggers a retry. The test must mock both the first and retry LLM calls. Alternatively, the existing test can mock both attempts to fail so it still expects an error event.
 
 5. **`frontend/src/components/MessageBubble.tsx`** — update the error display:
-   - When `message.error` is present, show a friendly wrapper message like "I couldn't execute the analysis. Try rephrasing your question or being more specific." followed by the technical error in a collapsible detail.
-   - Optionally show a "retrying..." indicator if the `retrying` SSE event is adopted.
-
-6. **`frontend/src/api.ts`** — if a `retrying` SSE event is added, add it to the switch statement and the `ChatCallbacks` interface.
-
-7. **`frontend/src/store.ts`** — possibly add a `retrying?: boolean` field to `Message` if the frontend needs to show retry state.
+   - When `message.error` is present, show a friendly wrapper message like "I couldn't execute the analysis. Try rephrasing your question or being more specific."
+   - Add a collapsible "Show details" toggle for the raw traceback, matching the existing "Show code" pattern.
 
 ### Function decomposition
 
@@ -109,7 +105,7 @@ No Phase A0 (wireframes) is needed. The frontend change is purely behavioral —
 
 1. **Retry count: 1** — the implementation plan specifies "Maximum retry count is 1 (original + 1 retry)." This is hardcoded as a constant `MAX_CODE_RETRIES = 1` in `main.py`.
 
-2. **Retry scope: execution errors only** — only `exec_result["error"]` (code execution failures) trigger a retry. LLM API errors (network, auth, rate limit) and JSON parse errors are NOT retried — they are fundamentally different failure modes where re-prompting won't help.
+2. **Retry scope: all error types** — all failures get one retry: execution errors (`exec_result["error"]`), LLM API errors (network, auth, rate limit), JSON parse errors, and execution timeouts. Transient network issues may resolve on a second attempt, non-deterministic LLM output may produce valid JSON on retry, and timeouts may benefit from a retry prompt that asks for simpler code.
 
 3. **Retry stays in `event_generator`, not in `llm.py`** — the implementation plan suggests a `generate_chat_response_with_retry()` in `llm.py` that wraps LLM call + execution. This would mean `llm.py` imports and calls `execute_code`, breaking the current clean separation where `llm.py` handles prompt construction and LLM calls while `main.py` orchestrates execution. The retry loop belongs in `event_generator` where both the LLM call and execution already live.
 
@@ -137,44 +133,14 @@ The existing `test_chat.py` patches `main.call_llm_chat` and `main.execute_code`
 
 ---
 
-## Open questions requiring user input
+## Resolved decisions
 
-### Q1: Should the user see the retry happening?
+1. **Silent retry** — no new SSE event type. The backend retries invisibly. The user either sees a successful result (if retry works) or a friendly error (if both fail).
 
-**Option A — Silent retry:** The backend retries invisibly. The user either sees a successful result (if retry works) or an error (if both fail). Simpler to implement, no new SSE event type needed.
+2. **All error types are retryable** — execution errors, LLM API failures (network, auth, rate limit), JSON parse errors, and execution timeouts all get one retry. For timeouts, the retry prompt should ask the LLM to generate simpler/faster code.
 
-**Option B — Visible retry with SSE event:** The backend yields a `retrying` SSE event before the retry attempt. The frontend shows a brief "Retrying analysis..." indicator. This is more transparent but adds a new SSE event type, a new callback in `api.ts`, and a new field on `Message` in `store.ts`.
+3. **Only the final outcome goes into conversation_history** — intermediate failed attempts are ephemeral (included in the retry LLM call's messages but not persisted).
 
-**Recommendation:** Option A (silent retry) for simplicity. The retry happens in ~2-5 seconds (one additional LLM call). If it succeeds, the user never needs to know. If it fails, the friendly error message is sufficient.
+4. **Friendly error wrapper + collapsible technical detail** — matches the existing "Show code" toggle pattern in `MessageBubble.tsx`.
 
-### Q2: What qualifies as a retryable error vs. a permanent failure?
-
-**Proposed classification:**
-- **Retryable (trigger retry):** `exec_result["error"]` is truthy — the LLM-generated code failed at runtime (NameError, TypeError, AttributeError, pandas errors, etc.). The LLM can plausibly fix these given the traceback.
-- **NOT retryable (immediate error):** LLM API call exception (network, auth, rate limit), JSON parse failure from `parse_chat_response`, timeout from executor ("Code execution timed out"). These won't be fixed by re-prompting.
-
-**Edge case — timeouts:** Should a timeout be retried? The LLM might generate more efficient code on retry, but it might also generate equally slow code, doubling the user's wait time. Proposed: do NOT retry timeouts.
-
-### Q3: Should error + retry context be added to conversation_history?
-
-**Proposed:** No. Only the final successful exchange (or the final failed exchange) is added to `conversation_history`. The retry context (failed code + traceback) is ephemeral — it's included in the messages for the retry LLM call but not persisted. This prevents the conversation history from being polluted with failed intermediate attempts, which would confuse the LLM on subsequent turns.
-
-### Q4: Frontend error message — how friendly?
-
-**Option A — Replace raw error entirely:** Show only "I couldn't execute the analysis. Try rephrasing your question." No technical detail visible.
-
-**Option B — Friendly wrapper + collapsible technical detail:** Show the friendly message prominently, with a "Show details" toggle that reveals the raw traceback. This helps advanced users debug while keeping the default experience clean.
-
-**Recommendation:** Option B — matches the existing "Show code" toggle pattern in `MessageBubble.tsx` (line 118-149).
-
-### Q5: Should the existing `test_chat_endpoint_streams_error_on_execution_failure` be updated?
-
-After Step 11, a single execution failure triggers a retry rather than an immediate SSE error. This existing test (test_chat.py line 365) mocks a single failed execution and expects an error event. It will need to either:
-- **(A)** Be updated to mock both the first and retry LLM calls (both producing failing code), so it still expects the error event after exhausting retries.
-- **(B)** Be left as-is if the mock setup happens to work (the single mock return value would be reused for both attempts).
-
-**Recommendation:** Option A — explicitly update the test to mock two failed attempts. This documents the retry behavior and prevents the test from being fragile.
-
----
-
-Does this plan look good? Would you like to adjust the scope, implementation approach, or phasing before I begin?
+5. **Update existing test** — `test_chat_endpoint_streams_error_on_execution_failure` must be updated to mock two failed attempts (original + retry) so it still expects the error event after exhausting retries.
