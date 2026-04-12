@@ -84,6 +84,23 @@ Where the implementation will differ from what the planning document proposes, a
 
 If there are no deviations, say so explicitly.
 
+### 6. Decisions needing user input
+
+List any ambiguities, trade-offs, or design choices that cannot be resolved from the implementation plan or codebase alone. These are questions where reasonable engineers could disagree, and the user's preference matters.
+
+For each decision, provide:
+- A clear statement of the choice
+- The options (with a brief pro/con for each)
+- A recommendation if you have one
+
+Common triggers for decisions:
+- The implementation plan assumes a data model that has since changed
+- Multiple valid UX approaches exist (e.g., one-click vs. confirm dialog)
+- A feature could be simple-now or extensible-later
+- The plan is silent on an important detail
+
+Surfacing decisions upfront — rather than making assumptions during implementation — avoids rework and ensures the user stays in control of product direction.
+
 ---
 
 ## Refactor-Specific Guidance
@@ -119,6 +136,7 @@ Refactors change module interfaces, data models, or API contracts — all of whi
 - **Behaviors to test** — those are proposed during Phase A, not upfront. The user may have changed their mind since the plan was written.
 - **Test code or implementation code** — the plan is a roadmap, not a code dump.
 - **Detailed prompt templates or API schemas** — those emerge during implementation.
+- **Resolved decisions** — once the user answers the questions in Section 6, incorporate their answers into the plan and proceed. Don't carry answered questions forward.
 
 ---
 
