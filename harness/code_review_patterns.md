@@ -215,6 +215,7 @@ def load_session(session_id: str) -> pd.DataFrame:
 - `except` blocks that only contain `pass`
 - Error messages that don't include enough context to debug (what input caused the error?)
 - Catching exceptions around code that shouldn't fail (e.g., dictionary access with a key you just validated)
+- Async functions called without `await` and without `.catch()` — fire-and-forget promises from event handlers or callbacks silently swallow errors. Always attach `.catch()` or wrap in try/catch if the result isn't awaited.
 
 ---
 

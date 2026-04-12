@@ -313,6 +313,50 @@ async def upload(file: UploadFile):
 
 ---
 
+## Frontend / SSE from POST Endpoints
+
+### EventSource Only Supports GET — Use fetch + ReadableStream for POST
+
+The browser's `EventSource` API only works with GET requests. If the backend SSE endpoint requires POST (e.g., sending a JSON body with session ID and question), `EventSource` will fail silently or throw. Use `fetch()` with `response.body.getReader()` and manually parse the SSE `event:` / `data:` lines.
+
+#### ❌ Anti-Pattern: EventSource with a POST endpoint
+```typescript
+// BAD: EventSource only sends GET — the request body is ignored,
+// and the backend returns 405 Method Not Allowed
+const source = new EventSource("/api/chat");
+source.onmessage = (e) => console.log(e.data);
+```
+
+#### ✓ Pattern: fetch + ReadableStream for POST-based SSE
+```typescript
+const response = await fetch("/api/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ session_id: sessionId, question }),
+});
+
+const reader = response.body!.getReader();
+const decoder = new TextDecoder();
+let buffer = "";
+
+for (;;) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  buffer += decoder.decode(value, { stream: true });
+  const parts = buffer.split("\n\n");
+  buffer = parts.pop()!; // keep incomplete event in buffer
+
+  for (const part of parts) {
+    // parse "event: <type>\ndata: <payload>" from each part
+  }
+}
+```
+
+**Why this matters:** This surfaced during Step 9 (Q&A frontend). The backend's `/api/chat` endpoint is POST because it accepts a JSON body. Attempting to use `EventSource` wastes a debugging cycle before discovering the GET-only limitation. The `fetch` + `ReadableStream` pattern is well-established and gives full control over request method, headers, and body.
+
+---
+
 ## Python / Subprocess Execution
 
 ### Use Processes, Not Threads, for Untrusted Code
