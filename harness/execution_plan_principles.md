@@ -45,6 +45,23 @@ The phases of work, presented as a numbered list. Every execution plan uses this
 
 Phases A–D follow TEST-STRATEGY.md. Phases E–F follow the mandatory code review and reflection gates from `document-routing.mdc`.
 
+#### Frontend-only steps: insert a Wireframe phase
+
+When a step is strictly frontend (no backend changes, no new API contracts), insert a **Phase A0 — Wireframes** before the test spec:
+
+| Phase | Name | What happens |
+|-------|------|-------------|
+| A0 | Wireframes | Present 2–3 markdown wireframe options showing layout, element placement, and content hierarchy. Wait for the user to pick a direction (or request changes) before proceeding. |
+
+Why this matters: frontend components are primarily *visual* artifacts. Reviewing a wireframe catches layout and UX issues far earlier than reviewing test cases or code. The wireframe doesn't need to be pixel-perfect — it shows spatial relationships, element grouping, and interaction flow using ASCII/markdown box diagrams.
+
+The wireframe phase applies whenever the step:
+- Creates new UI components (modals, panels, screens, cards)
+- Significantly restructures existing layout
+- Introduces a new interaction pattern (wizard, drag-and-drop, etc.)
+
+Skip A0 when the frontend change is purely behavioral with no visible layout change (e.g., wiring a click handler to an existing button, changing a store action).
+
 ### 4. Implementation approach
 
 Key design decisions for this step:

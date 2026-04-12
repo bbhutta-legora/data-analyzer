@@ -7,6 +7,7 @@
 // with real components in Steps 6, 7, and 9 respectively.
 
 import { useStore } from "./store";
+import HelpModal from "./components/HelpModal";
 
 function SetupScreen() {
   return <div data-testid="screen-setup">Setup screen — coming in Step 6</div>;
@@ -20,10 +21,19 @@ function ChatScreen() {
   return <div data-testid="screen-chat">Chat screen — coming in Step 9</div>;
 }
 
-export default function App() {
+function CurrentScreen() {
   const currentScreen = useStore((state) => state.currentScreen);
 
   if (currentScreen === "upload") return <UploadScreen />;
   if (currentScreen === "chat") return <ChatScreen />;
   return <SetupScreen />;
+}
+
+export default function App() {
+  return (
+    <>
+      <CurrentScreen />
+      <HelpModal />
+    </>
+  );
 }

@@ -30,7 +30,7 @@
 | 12 | Guided ML backend | Vertical | High | 8 | #5 Guided ML | |
 | 13 | Guided ML frontend | Vertical | Medium | 12, 9 | #5 Guided ML | |
 | 14 | Export | Vertical | Medium | 9 | #7 Export | |
-| 15 | Help | Vertical | Low | 5 | #9 Help | |
+| 15 | Help | Vertical | Low | 5 | #9 Help | ✅ Done |
 
 ---
 
