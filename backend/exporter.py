@@ -12,6 +12,7 @@
 
 NBFORMAT_VERSION = 4
 NBFORMAT_MINOR_VERSION = 5
+NOTEBOOK_PYTHON_VERSION = "3.11.0"
 
 
 def build_notebook(code_history: list[dict], filename: str) -> dict:
@@ -97,7 +98,7 @@ def _notebook_wrapper(cells: list[dict]) -> dict:
             },
             "language_info": {
                 "name": "python",
-                "version": "3.11.0",
+                "version": NOTEBOOK_PYTHON_VERSION,
             },
         },
         "cells": cells,
