@@ -11,7 +11,7 @@ Before starting work, read the documents listed for the matching task type. When
 
 | Task | Read these documents |
 |------|---------------------|
-| **Writing or implementing code** | `harness/coding_principles.md`, `harness/framework_patterns.md`, `harness/TEST-STRATEGY.md`, `harness/code_review_patterns.md`, `harness/reflection.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
+| **Writing or implementing code** | `harness/execution_plan_principles.md`, `harness/coding_principles.md`, `harness/framework_patterns.md`, `harness/TEST-STRATEGY.md`, `harness/code_review_patterns.md`, `harness/reflection.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
 | **Reviewing code** | `harness/code_review_patterns.md` |
 | **Writing or running tests** | `harness/TEST-STRATEGY.md`, `harness/coding_principles.md` |
 | **Writing or updating the PRD** | `harness/prd_principles.md`, `planning/PRD.md` |
@@ -28,6 +28,7 @@ Before starting work, read the documents listed for the matching task type. When
 4. **Planning docs are context, not templates.** Read planning docs to understand project decisions and constraints. Do not copy code from them verbatim — defer to `harness/coding_principles.md` when they conflict.
 5. **Process gates are not optional.** When a harness document prescribes human review steps (e.g., TEST-STRATEGY.md Steps 1–2 require user confirmation before writing tests), follow them even when a planning document appears to pre-answer them. Planning documents propose; review steps confirm. Never skip a user confirmation gate because prior artifacts seem to cover it.
 6. **Full implementation lifecycle.** When implementing code, follow this sequence:
-   1. **Tests first** — follow `harness/TEST-STRATEGY.md` (behaviors → test cases → user confirmation → write tests → run failing → implement → run passing → break check → self-audit → user confirmation)
-   2. **Code review** — once tests pass, review all changed files against `harness/code_review_patterns.md` and fix any issues found
-   3. **Reflection** — follow `harness/reflection.md` to capture learnings and propose harness updates
+   1. **Execution plan** — follow `harness/execution_plan_principles.md` to produce a plan for the step and get user confirmation before any coding begins
+   2. **Tests first** — follow `harness/TEST-STRATEGY.md` (behaviors → test cases → user confirmation → write tests → run failing → implement → run passing → break check → self-audit → user confirmation)
+   3. **Code review** — once tests pass, review all changed files against `harness/code_review_patterns.md` and fix any issues found
+   4. **Reflection** — follow `harness/reflection.md` to capture learnings and propose harness updates
