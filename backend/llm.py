@@ -502,8 +502,12 @@ def infer_problem_type(df, target_column: str) -> str:
     2. Numeric dtype with <= CLASSIFICATION_UNIQUE_VALUE_THRESHOLD unique values → classification
     3. Otherwise → regression
 
-    Failure modes: none — always returns "classification" or "regression".
+    Failure modes:
+    - target_column not in DataFrame → raises ValueError
     """
+    if target_column not in df.columns:
+        raise ValueError("Column '" + target_column + "' not found in DataFrame")
+
     col = df[target_column]
 
     if col.dtype == "object" or col.dtype == "bool":
@@ -528,9 +532,12 @@ def build_target_selection_prompt(df) -> str:
 
     Failure modes: none — always returns a non-empty string.
     """
+    rows, cols = df.shape
     lines = [
         "You are a data analysis assistant helping a user build a predictive model.",
         "The user needs to choose a target column (the column they want to predict).",
+        "",
+        "Dataset shape: " + str(rows) + " rows, " + str(cols) + " columns",
         "",
         "Available columns:",
     ]
@@ -548,6 +555,8 @@ def build_target_selection_prompt(df) -> str:
             + ", sample: " + sample_str + ")"
         )
 
+    lines.append("")
+    lines.append(_build_library_section())
     lines.append("")
     lines.append("Based on the data, recommend which column would be a good prediction target.")
     lines.append("Explain why in simple terms.")
@@ -594,6 +603,23 @@ def build_feature_selection_prompt(df, target_column: str, problem_type: str) ->
             + missing_info + ")"
         )
 
+    # Include correlations with the target for numeric columns
+    numeric_cols = [
+        str(col) for col in df.columns
+        if str(col) != str(target_column) and df[col].dtype.kind in ("i", "f")
+    ]
+    if numeric_cols and df[target_column].dtype.kind in ("i", "f"):
+        lines.append("")
+        lines.append("Correlations with target (" + str(target_column) + "):")
+        for col in numeric_cols:
+            try:
+                corr_val = df[col].corr(df[target_column])
+                lines.append("  " + col + ": " + str(round(corr_val, 4)))
+            except Exception:
+                pass
+
+    lines.append("")
+    lines.append(_build_library_section())
     lines.append("")
     lines.append(
         "Recommend which features to include and explain why. "
@@ -650,6 +676,8 @@ def build_preprocessing_prompt(df, target_column: str, features: list) -> str:
         lines.append(detail)
 
     lines.append("")
+    lines.append(_build_library_section())
+    lines.append("")
     lines.append(
         "Recommend preprocessing steps: encoding for categorical columns, "
         "scaling for numeric columns, and how to handle any missing values. "
@@ -683,6 +711,8 @@ def build_model_selection_prompt(problem_type: str, df_shape: tuple) -> str:
         "- Note any limitations or considerations",
         "",
         "Recommend one model as the best starting point and explain why.",
+        "",
+        _build_library_section(),
         "",
     ]
     lines.append(_ML_MODEL_RESPONSE_FORMAT)
@@ -735,6 +765,8 @@ def build_training_prompt(
     lines.append("- Use print() for all output (not return statements)")
     lines.append("- The code must be self-contained and executable in the sandbox")
     lines.append("")
+    lines.append(_build_library_section())
+    lines.append("")
     lines.append(_ML_TRAINING_RESPONSE_FORMAT)
 
     return "\n".join(lines)
@@ -761,6 +793,8 @@ def build_explanation_prompt(training_result: str) -> str:
         "- What the metrics mean in practical terms",
         "- Any caveats or limitations to be aware of",
         "- Suggestions for potential improvements",
+        "",
+        _build_library_section(),
         "",
         _ML_EXPLANATION_RESPONSE_FORMAT,
     ]
@@ -863,6 +897,9 @@ def parse_ml_step_response(raw: str) -> dict:
     except json.JSONDecodeError as exc:
         logger.warning("Failed to parse LLM ML step response as JSON: %s", exc)
         return {"error": "Invalid JSON in LLM response: " + str(exc)}
+
+    if not isinstance(parsed, dict):
+        return {"error": "Expected JSON object, got " + type(parsed).__name__}
 
     # Ensure explanation always has a safe default
     if "explanation" not in parsed:

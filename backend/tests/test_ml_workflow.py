@@ -36,7 +36,9 @@
 import json
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from llm import (
     build_explanation_prompt,
@@ -546,3 +548,305 @@ def test_ml_step_training_stage_executes_code():
     # Verify result event was emitted
     result_events = [e for e in events if e["event"] == "result"]
     assert len(result_events) == 1
+
+
+# ── infer_problem_type edge cases ─────────────────────────────────────────
+
+
+def test_infer_problem_type_single_unique_value():
+    # Edge case: target with only 1 unique value should still return "classification"
+    # and not crash. 1 <= 10 so falls into classification bucket.
+    df = pd.DataFrame({"target": [1, 1, 1, 1]})
+    assert infer_problem_type(df, "target") == "classification"
+
+
+def test_infer_problem_type_all_nan():
+    # Edge case: target column is all NaN. nunique() returns 0, which is <= 10,
+    # so it should return "classification" without crashing.
+    df = pd.DataFrame({"target": [np.nan, np.nan, np.nan]})
+    assert infer_problem_type(df, "target") == "classification"
+
+
+def test_infer_problem_type_nonexistent_column():
+    # Bug 3 fix: referencing a column that doesn't exist should raise ValueError.
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    with pytest.raises(ValueError, match="not found"):
+        infer_problem_type(df, "nonexistent")
+
+
+def test_infer_problem_type_100_unique_ints():
+    # Edge case: 100 unique integer values is well above the 10-unique threshold,
+    # so it should return "regression".
+    df = pd.DataFrame({"target": list(range(100))})
+    assert infer_problem_type(df, "target") == "regression"
+
+
+# ── Prompt builder edge cases ──────────────────────────────────────────────
+
+
+def test_target_prompt_with_empty_dataframe():
+    # Edge case: empty DataFrame (0 rows) should not crash, and should list columns.
+    df = pd.DataFrame({"a": pd.Series(dtype="float64"), "b": pd.Series(dtype="object")})
+    prompt = build_target_selection_prompt(df)
+    assert "a" in prompt
+    assert "b" in prompt
+
+
+def test_target_prompt_with_single_column():
+    # Edge case: DataFrame with only one column should still work.
+    df = pd.DataFrame({"only_col": [1, 2, 3]})
+    prompt = build_target_selection_prompt(df)
+    assert "only_col" in prompt
+
+
+def test_target_prompt_includes_dataset_shape():
+    # Fix 6: target prompt should include df.shape information.
+    df = make_ml_df()
+    prompt = build_target_selection_prompt(df)
+    assert str(df.shape[0]) in prompt  # row count
+    assert str(df.shape[1]) in prompt  # column count
+
+
+def test_feature_prompt_with_all_categorical_features():
+    # Edge case: all non-target features are categorical. Should list them.
+    df = pd.DataFrame({
+        "target": [1, 2, 3],
+        "cat_a": ["x", "y", "z"],
+        "cat_b": ["a", "b", "c"],
+    })
+    prompt = build_feature_selection_prompt(df, "target", "classification")
+    assert "cat_a" in prompt
+    assert "cat_b" in prompt
+
+
+def test_feature_prompt_with_single_non_target_column():
+    # Edge case: only one feature column besides the target.
+    df = pd.DataFrame({"target": [1, 2, 3], "feature": [4, 5, 6]})
+    prompt = build_feature_selection_prompt(df, "target", "regression")
+    assert "feature" in prompt
+
+
+def test_feature_prompt_includes_correlations():
+    # Fix 5: feature selection prompt should include correlations with the target.
+    df = pd.DataFrame({
+        "target": [1.0, 2.0, 3.0, 4.0, 5.0],
+        "corr_feature": [2.0, 4.0, 6.0, 8.0, 10.0],
+        "other": [5.0, 4.0, 3.0, 2.0, 1.0],
+    })
+    prompt = build_feature_selection_prompt(df, "target", "regression")
+    assert "Correlations with target" in prompt
+    assert "corr_feature" in prompt
+
+
+def test_preprocessing_prompt_no_missing_values():
+    # Edge case: no missing values should not mention "missing" in column detail lines.
+    df = pd.DataFrame({
+        "target": [1, 2, 3],
+        "feature": [4, 5, 6],
+    })
+    prompt = build_preprocessing_prompt(df, "target", ["feature"])
+    # Should say "no missing values" rather than reporting a count
+    assert "no missing" in prompt.lower()
+
+
+def test_training_prompt_includes_json_format_instructions():
+    # The training prompt should include JSON format instructions so the LLM
+    # returns structured output.
+    prompt = build_training_prompt("price", ["size"], "random_forest", "regression")
+    assert "json" in prompt.lower() or "JSON" in prompt
+
+
+def test_explanation_prompt_with_empty_training_result():
+    # Edge case: empty training result string should not crash.
+    prompt = build_explanation_prompt("")
+    assert "Training output:" in prompt
+    assert len(prompt) > 0
+
+
+def test_all_ml_prompts_include_sandbox_library_list():
+    # Fix 4: every ML prompt builder should include the sandbox library list.
+    df = make_ml_df()
+
+    target_prompt = build_target_selection_prompt(df)
+    feature_prompt = build_feature_selection_prompt(df, "price", "regression")
+    preprocessing_prompt = build_preprocessing_prompt(df, "price", ["size", "color"])
+    model_prompt = build_model_selection_prompt("regression", (100, 5))
+    training_prompt = build_training_prompt("price", ["size"], "random_forest", "regression")
+    explanation_prompt = build_explanation_prompt("R2=0.95")
+
+    for prompt_name, prompt in [
+        ("target", target_prompt),
+        ("feature", feature_prompt),
+        ("preprocessing", preprocessing_prompt),
+        ("model", model_prompt),
+        ("training", training_prompt),
+        ("explanation", explanation_prompt),
+    ]:
+        assert "Available libraries" in prompt, (
+            prompt_name + " prompt missing sandbox library list"
+        )
+
+
+# ── parse_ml_step_response edge cases ─────────────────────────────────────
+
+
+def test_parse_ml_step_response_json_array_returns_error():
+    # Bug 2 fix: JSON array input should return an error dict, not crash.
+    parsed = parse_ml_step_response("[1, 2, 3]")
+    assert "error" in parsed
+    assert "list" in parsed["error"]
+
+
+def test_parse_ml_step_response_empty_string_returns_error():
+    # Edge case: empty string is not valid JSON.
+    parsed = parse_ml_step_response("")
+    assert "error" in parsed
+
+
+def test_parse_ml_step_response_extra_fields_preserved():
+    # Edge case: unexpected extra fields should not cause a crash and should
+    # be preserved (pass-through parsing).
+    raw = json.dumps({
+        "explanation": "test",
+        "extra_field": "bonus_data",
+        "another": 42,
+    })
+    parsed = parse_ml_step_response(raw)
+    assert "error" not in parsed
+    assert parsed["extra_field"] == "bonus_data"
+    assert parsed["another"] == 42
+
+
+def test_parse_ml_step_response_missing_explanation_defaults():
+    # Edge case: missing "explanation" field should default gracefully.
+    raw = json.dumps({"target_column": "price"})
+    parsed = parse_ml_step_response(raw)
+    assert "error" not in parsed
+    assert parsed["explanation"] == ""
+
+
+# ── Session state edge cases ──────────────────────────────────────────────
+
+
+def test_restart_from_features_keeps_target_clears_features_and_model():
+    # Restarting from "features" should keep target but clear features and model.
+    session_id = create_ml_session()
+    session = session_store.get(session_id)
+
+    # Set up state as if we've progressed to "training"
+    session.ml_stage = "training"
+    session.ml_target_column = "price"
+    session.ml_features = ["size", "color"]
+    session.ml_problem_type = "regression"
+    session.ml_model_choice = "random_forest"
+
+    # Restart from "features"
+    with patch("main.call_llm_chat", return_value=MOCK_ML_FEATURE_RESPONSE), \
+         patch("main.execute_code", return_value=MOCK_EXECUTION_RESULT):
+        response = client.post("/api/ml-step", json={
+            "session_id": session_id,
+            "stage": "features",
+            "user_input": "Use different features",
+        })
+    assert response.status_code == 200
+
+    session = session_store.get(session_id)
+    # Target should still be set (from prior run, not reset)
+    assert session.ml_target_column == "price"
+    # Model choice should be cleared since it's after "features"
+    assert session.ml_model_choice is None
+
+
+def test_state_independent_across_sessions():
+    # Changing ML state in one session should not affect another.
+    session_id_1 = create_ml_session()
+    session_id_2 = create_ml_session()
+
+    session_1 = session_store.get(session_id_1)
+    session_2 = session_store.get(session_id_2)
+
+    session_1.ml_stage = "model"
+    session_1.ml_target_column = "price"
+    session_1.ml_features = ["size"]
+
+    # Session 2 should be unaffected
+    assert session_2.ml_stage is None
+    assert session_2.ml_target_column is None
+    assert session_2.ml_features is None
+
+
+# ── Endpoint edge cases ──────────────────────────────────────────────────
+
+
+def test_ml_step_empty_user_input_returns_400():
+    # Empty user_input should return 400 before any LLM call.
+    session_id = create_ml_session()
+
+    response = client.post("/api/ml-step", json={
+        "session_id": session_id,
+        "stage": "target",
+        "user_input": "",
+    })
+    assert response.status_code == 400
+
+
+def test_ml_step_appends_to_code_history():
+    # Bug 1 fix: successful ML step should append to code_history.
+    session_id = create_ml_session()
+
+    with patch("main.call_llm_chat", return_value=MOCK_ML_TARGET_RESPONSE), \
+         patch("main.execute_code", return_value=MOCK_EXECUTION_RESULT):
+        response = client.post("/api/ml-step", json={
+            "session_id": session_id,
+            "stage": "target",
+            "user_input": "I want to predict price",
+        })
+
+    assert response.status_code == 200
+    session = session_store.get(session_id)
+    assert len(session.code_history) == 1
+    assert session.code_history[0]["explanation"] != ""
+
+
+def test_ml_step_restart_from_target_resets_state():
+    # Restarting from "target" after progressing should reset all downstream state.
+    session_id = create_ml_session()
+    session = session_store.get(session_id)
+
+    # Manually set state as if we've progressed to "model"
+    session.ml_stage = "model"
+    session.ml_target_column = "sold"
+    session.ml_features = ["price", "size"]
+    session.ml_problem_type = "classification"
+    session.ml_model_choice = "logistic_regression"
+
+    with patch("main.call_llm_chat", return_value=MOCK_ML_TARGET_RESPONSE), \
+         patch("main.execute_code", return_value=MOCK_EXECUTION_RESULT):
+        response = client.post("/api/ml-step", json={
+            "session_id": session_id,
+            "stage": "target",
+            "user_input": "Switch to predicting price",
+        })
+    assert response.status_code == 200
+
+    session = session_store.get(session_id)
+    assert session.ml_stage == "target"
+    assert session.ml_features is None
+    assert session.ml_model_choice is None
+
+
+def test_ml_step_sse_stream_ends_with_done():
+    # Every successful SSE stream should end with a "done" event.
+    session_id = create_ml_session()
+
+    with patch("main.call_llm_chat", return_value=MOCK_ML_TARGET_RESPONSE), \
+         patch("main.execute_code", return_value=MOCK_EXECUTION_RESULT):
+        response = client.post("/api/ml-step", json={
+            "session_id": session_id,
+            "stage": "target",
+            "user_input": "predict price",
+        })
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[-1]["event"] == "done"

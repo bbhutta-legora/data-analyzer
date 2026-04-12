@@ -669,6 +669,15 @@ def ml_step(request: MlStepRequest):
             },
         )
 
+    if not request.user_input.strip():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "empty_user_input",
+                "detail": "User input cannot be empty.",
+            },
+        )
+
     # Validate stage progression before starting the SSE stream.
     # Returns a non-streaming error response so the frontend can handle it cleanly.
     validation_error = _validate_ml_stage_progression(session.ml_stage, request.stage)
@@ -717,6 +726,7 @@ def ml_step(request: MlStepRequest):
         yield _sse_event("explanation", parsed.get("explanation", ""))
 
         # Training stage: execute the generated code
+        exec_result: dict | None = None
         if request.stage == "training" and parsed.get("code"):
             exec_result = execute_code(parsed["code"], session.exec_namespace)
 
@@ -750,6 +760,16 @@ def ml_step(request: MlStepRequest):
         session.conversation_history.append({
             "role": "assistant",
             "content": parsed.get("explanation", ""),
+        })
+
+        # Append to code_history for notebook export (same pattern as /api/chat)
+        session.code_history.append({
+            "code": parsed.get("code", ""),
+            "explanation": parsed["explanation"],
+            "result": {
+                "stdout": exec_result["stdout"] if exec_result else "",
+                "figures": exec_result["figures"] if exec_result else [],
+            },
         })
 
         yield _sse_event("done", "")
