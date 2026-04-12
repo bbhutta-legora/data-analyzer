@@ -13,16 +13,20 @@
 #   Step 14: /api/export   — notebook export
 
 import io
+import logging
 import pathlib
 
 import pandas as pd
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from llm import generate_summary
 from providers import ANTHROPIC_VALIDATION_MODEL, AVAILABLE_MODELS, ProviderLiteral
 from session import SessionStore
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -235,12 +239,24 @@ def validate_key(body: ValidateKeyRequest) -> JSONResponse:
 
 
 @app.post("/api/upload")
-def upload_file(file: UploadFile) -> JSONResponse:
+def upload_file(
+    file: UploadFile,
+    api_key: str = Form(""),
+    provider: str = Form(""),
+    model: str = Form(""),
+) -> JSONResponse:
     """
     Accept a CSV or Excel file, parse it into DataFrames, create a session,
-    and return dataset metadata.
+    and return dataset metadata. When credentials are provided, also calls the
+    LLM to generate an initial dataset summary (PRD #2).
 
-    Uses a sync def (not async) because all work is synchronous pandas I/O.
+    The api_key/provider/model Form fields are optional — omitting them skips
+    the LLM call and returns only structural metadata. This preserves backward
+    compatibility with existing upload tests and allows file parsing to work
+    independently of LLM availability.
+
+    Uses a sync def (not async) because all work is synchronous pandas I/O
+    and the LLM SDK calls are also synchronous.
     FastAPI runs sync handlers in a threadpool automatically.
 
     Architecture ref: "File upload (REST)" in planning/architecture.md §3.3
@@ -287,8 +303,10 @@ def upload_file(file: UploadFile) -> JSONResponse:
     try:
         dataframes = parse_dataframes_from_bytes(content, filename)
     except Exception as exc:
-        # Malformed CSV, corrupt Excel, or unsupported encoding — surface a clear message
-        # rather than letting FastAPI produce a 500 with a raw pandas traceback.
+        # Broad catch is intentional — malformed CSV, corrupt Excel, or unsupported
+        # encoding all surface as different pandas/openpyxl exceptions. We catch
+        # them here with a clear message rather than letting FastAPI produce a 500
+        # with a raw traceback.
         return JSONResponse(
             status_code=400,
             content={
@@ -297,13 +315,21 @@ def upload_file(file: UploadFile) -> JSONResponse:
             },
         )
 
-    session_id = session_store.create(dataframes)
+    session_id = session_store.create(
+        dataframes, api_key=api_key, provider=provider, model=model,
+    )
     datasets = build_dataset_metadata(dataframes)
 
-    return JSONResponse(
-        status_code=200,
-        content={
-            "session_id": session_id,
-            "datasets": datasets,
-        },
-    )
+    response_content: dict = {
+        "session_id": session_id,
+        "datasets": datasets,
+    }
+
+    # Only call the LLM if credentials were provided.
+    # Without credentials, the upload still works for parsing/metadata.
+    if api_key and provider and model:
+        logger.info("Generating LLM summary for session %s", session_id)
+        summary = generate_summary(dataframes, api_key, provider, model)
+        response_content["summary"] = summary
+
+    return JSONResponse(status_code=200, content=response_content)

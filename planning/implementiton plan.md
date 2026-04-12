@@ -22,7 +22,7 @@
 | 4 | File upload endpoint | Foundation | Medium | 2, 3 | #1 Upload | ✅ Done |
 | 5 | Frontend scaffolding | Foundation | Low | 1 | — | ✅ Done |
 | 6 | BYOK setup | Vertical | Low | 4, 5 | #8 BYOK | ✅ Done |
-| 7 | Initial summary | Vertical | Medium | 6 | #2 Initial summary | |
+| 7 | Initial summary | Vertical | Medium | 6 | #2 Initial summary | ✅ Done |
 | 8 | Q&A backend | Vertical | High | 7 | #3 Conversational Q&A | |
 | 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A | |
 | 10 | Data cleaning | Vertical | Medium | 9 | #4 Data cleaning | |

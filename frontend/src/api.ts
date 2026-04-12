@@ -10,7 +10,7 @@
 //   Step 10: applyCleaningAction()
 //   Step 14: exportNotebook()
 
-import type { Provider } from "./store";
+import type { Provider, DatasetMetadata, SummaryData } from "./store";
 
 // API_BASE is empty — requests go to /api/* which Vite proxies to the backend.
 // This avoids hardcoding the backend port in application code.
@@ -97,4 +97,54 @@ export async function validateApiKey(
     method: "POST",
     body: JSON.stringify({ api_key: apiKey, provider }),
   });
+}
+
+// ── Step 7: File Upload ───────────────────────────────────────────────────────
+
+interface UploadResponse {
+  session_id: string;
+  datasets: Record<string, DatasetMetadata>;
+  summary?: SummaryData;
+}
+
+/**
+ * Upload a dataset file to the backend.
+ *
+ * Uses FormData (not JSON) because the endpoint accepts multipart/form-data.
+ * The api_key, provider, and model are sent as form fields alongside the file
+ * so the backend can store them on the session and call the LLM for summary.
+ *
+ * Does NOT use apiFetch — multipart uploads need the browser to set the
+ * Content-Type header with the boundary automatically. The error handling
+ * pattern (check response.ok → parse body → throw ApiError) is intentionally
+ * duplicated from apiFetch for this reason.
+ *
+ * PRD ref: #1 (upload), #2 (initial summary)
+ */
+export async function uploadFile(
+  file: File,
+  apiKey: string,
+  provider: Provider,
+  model: string
+): Promise<UploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("api_key", apiKey);
+  formData.append("provider", provider);
+  formData.append("model", model);
+
+  const response = await fetch(`${API_BASE}/api/upload`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({
+      error: "unknown_error",
+      detail: response.statusText,
+    }));
+    throw new ApiError(response.status, body.error, body.detail);
+  }
+
+  return response.json() as Promise<UploadResponse>;
 }

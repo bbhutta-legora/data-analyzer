@@ -45,9 +45,9 @@ The phases of work, presented as a numbered list. Every execution plan uses this
 
 Phases A–D follow TEST-STRATEGY.md. Phases E–F follow the mandatory code review and reflection gates from `document-routing.mdc`.
 
-#### Frontend-only steps: insert a Wireframe phase
+#### Wireframe phase for UI changes
 
-When a step is strictly frontend (no backend changes, no new API contracts), insert a **Phase A0 — Wireframes** before the test spec:
+Whenever a step creates or significantly changes frontend UI, insert a **Phase A0 — Wireframes** before the test spec — regardless of whether the step also includes backend work:
 
 | Phase | Name | What happens |
 |-------|------|-------------|
@@ -59,6 +59,8 @@ The wireframe phase applies whenever the step:
 - Creates new UI components (modals, panels, screens, cards)
 - Significantly restructures existing layout
 - Introduces a new interaction pattern (wizard, drag-and-drop, etc.)
+
+This includes mixed backend+frontend steps (e.g., Step 7 creates both `llm.py` and `FileUpload.tsx` / `DataSummary.tsx`). The backend can proceed through the standard phases (A–F) without wireframes, but the frontend components must go through A0 before implementation.
 
 Skip A0 when the frontend change is purely behavioral with no visible layout change (e.g., wiring a click handler to an existing button, changing a store action).
 

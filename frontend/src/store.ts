@@ -3,9 +3,8 @@
 // Holds session state, UI navigation state, and dataset metadata.
 // Architecture ref: "State Shape (Zustand)" in planning/architecture.md §4.2
 //
-// Type placeholders (messages: Message[], datasetInfo: DatasetInfo) will be
-// tightened in Steps 7–9 once the LLM response and upload response shapes are
-// defined. Using `unknown` here rather than `any` so TypeScript flags misuse.
+// Types for DatasetInfo and SummaryData mirror the backend response shapes
+// from /api/upload. Changes to the backend response must be reflected here.
 
 import { create } from "zustand";
 
@@ -17,23 +16,52 @@ type Screen = "setup" | "upload" | "chat";
 // Both must be kept in sync if a new provider is added.
 export type Provider = "openai" | "anthropic";
 
+// ── Response types from /api/upload ─────────────────────────────────────────
+// These mirror the JSON structure returned by build_dataset_metadata() in main.py.
+
+export interface DatasetMetadata {
+  row_count: number;
+  column_count: number;
+  columns: string[];
+  dtypes: Record<string, string>;
+  missing_values: Record<string, number>;
+}
+
+export interface CleaningSuggestion {
+  description: string;
+  options: string[];
+}
+
+export interface SummaryData {
+  explanation: string;
+  cleaning_suggestions: CleaningSuggestion[];
+  suggested_questions: string[];
+  error?: string;
+}
+
+export interface DatasetInfo {
+  datasets: Record<string, DatasetMetadata>;
+  summary: SummaryData | null;
+}
+
+// ── Store ────────────────────────────────────────────────────────────────────
+
 interface AppState {
   sessionId: string | null;
   apiKey: string | null;
-  // provider, model are set alongside apiKey after successful BYOK validation (Step 6).
-  // All three are passed to the upload endpoint (Step 7) so the session stores them.
   provider: Provider | null;
   model: string | null;
   messages: unknown[];
   isStreaming: boolean;
-  datasetInfo: unknown | null;
+  datasetInfo: DatasetInfo | null;
   currentScreen: Screen;
 
-  // Step 7 adds setSessionId, setDatasetInfo, setMessages.
   setApiKey: (key: string) => void;
   setProvider: (provider: Provider) => void;
   setModel: (model: string) => void;
   setScreen: (screen: Screen) => void;
+  setSessionId: (id: string) => void;
+  setDatasetInfo: (info: DatasetInfo) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -50,4 +78,6 @@ export const useStore = create<AppState>((set) => ({
   setProvider: (provider) => set({ provider }),
   setModel: (model) => set({ model }),
   setScreen: (screen) => set({ currentScreen: screen }),
+  setSessionId: (id) => set({ sessionId: id }),
+  setDatasetInfo: (info) => set({ datasetInfo: info }),
 }));
