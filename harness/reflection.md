@@ -43,9 +43,20 @@ Convert the specific experience into a general principle:
 | Task sequencing, milestone dependencies | `planning/implementiton plan.md` |
 | Meta-guidance for AI behavior | `harness/` (existing or new file) |
 
-### Step 4: Propose the Update
+### Step 4: Update Planning Documents
 
-Suggest specific text to add to the appropriate document. Be concrete:
+Follow `harness/updatingHigherLevelDocs.md` to check whether the completed task requires updates to planning documents. Common triggers:
+
+- **Completed an implementation step** — mark it done in `planning/implementiton plan.md`
+- **Deviated from the architecture** — update `planning/architecture.md` to match reality
+- **Changed scope** — update `planning/PRD.md` (features added, removed, or deferred)
+- **Refactored a module** — update `planning/architecture.md` and check if remaining steps in `planning/implementiton plan.md` reference the old structure
+
+Planning docs that describe something different from the current code are worse than no docs — they actively mislead future sessions.
+
+### Step 5: Propose Harness Updates
+
+Suggest specific text to add to the appropriate harness document. Be concrete:
 - Include code examples for patterns/anti-patterns
 - Add to existing sections where the content fits
 - Create new sections only when the topic is distinct

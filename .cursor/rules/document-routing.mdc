@@ -18,7 +18,7 @@ Before starting work, read the documents listed for the matching task type. When
 | **Architecture decisions or design** | `harness/architectural_principles.md`, `planning/architecture.md` |
 | **Writing or updating the implementation plan** | `harness/implementation_plan_principles.md`, `planning/implementiton plan.md` |
 | **Asking the user clarifying questions** | `harness/question_ordering.md` |
-| **Reflecting after completing a task** | `harness/reflection.md` |
+| **Reflecting after completing a task** | `harness/reflection.md`, `harness/updatingHigherLevelDocs.md` |
 
 ## Rules
 
