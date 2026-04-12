@@ -27,12 +27,22 @@ from clean import VALID_ACTIONS, apply_cleaning_action
 from executor import execute_code
 from exporter import build_notebook
 from llm import (
+    ML_STAGES,
+    PROBLEM_TYPE_CLASSIFICATION,
     build_chat_messages,
     build_chat_system_prompt,
+    build_explanation_prompt,
+    build_feature_selection_prompt,
+    build_model_selection_prompt,
+    build_preprocessing_prompt,
     build_retry_messages,
+    build_target_selection_prompt,
+    build_training_prompt,
     call_llm_chat,
     generate_summary,
+    infer_problem_type,
     parse_chat_response,
+    parse_ml_step_response,
     truncate_history,
 )
 from providers import ANTHROPIC_VALIDATION_MODEL, AVAILABLE_MODELS, ProviderLiteral
@@ -202,6 +212,12 @@ class CleanRequest(BaseModel):
 
 class ResetRequest(BaseModel):
     session_id: str
+
+
+class MlStepRequest(BaseModel):
+    session_id: str
+    stage: str
+    user_input: str
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -455,14 +471,9 @@ def chat(request: ChatRequest):
         session.conversation_history.append({
             "role": "assistant", "content": parsed["explanation"],
         })
-        session.code_history.append({
-            "code": parsed.get("code", ""),
-            "explanation": parsed["explanation"],
-            "result": {
-                "stdout": exec_result["stdout"] if exec_result else "",
-                "figures": exec_result["figures"] if exec_result else [],
-            },
-        })
+        _append_to_code_history(
+            session, parsed["explanation"], parsed.get("code", ""), exec_result,
+        )
 
         yield _sse_event("done", "")
 
@@ -600,6 +611,24 @@ def _sse_event(event_type: str, data: str) -> str:
     return "event: " + event_type + "\ndata: " + data + "\n\n"
 
 
+def _append_to_code_history(
+    session, explanation: str, code: str, exec_result: dict | None,
+) -> None:
+    """
+    Append a code-history entry to the session for notebook export.
+
+    Shared between chat and ML endpoints so the export format stays consistent.
+    """
+    session.code_history.append({
+        "code": code,
+        "explanation": explanation,
+        "result": {
+            "stdout": exec_result["stdout"] if exec_result else "",
+            "figures": exec_result["figures"] if exec_result else [],
+        },
+    })
+
+
 # ── Clean endpoint (Step 10) ────────────────────────────────────────────────
 
 
@@ -733,3 +762,290 @@ def clean_reset(request: ResetRequest) -> JSONResponse:
         status_code=200,
         content={"datasets": datasets},
     )
+
+
+# ── Guided ML endpoint (Step 12) ───────────────────────────────────────────
+
+
+def _validate_ml_stage_progression(current_stage: str | None, requested_stage: str) -> str | None:
+    """
+    Validate that the requested ML stage is a valid transition from the current stage.
+
+    Returns None if valid, or an error message string if invalid.
+
+    Rules:
+    - First stage must be "target" (current_stage is None)
+    - Can advance to the next stage in sequence
+    - Can restart from any earlier stage (or the same stage)
+    - Cannot skip ahead past the next stage
+
+    Failure modes: none — always returns None or an error string.
+    """
+    if requested_stage not in ML_STAGES:
+        return "Invalid stage: " + requested_stage + ". Valid stages: " + ", ".join(ML_STAGES)
+
+    requested_index = ML_STAGES.index(requested_stage)
+
+    # First ML interaction — only "target" is allowed
+    if current_stage is None:
+        if requested_stage != "target":
+            return (
+                "ML workflow must start with the 'target' stage. "
+                "Requested: " + requested_stage
+            )
+        return None
+
+    current_index = ML_STAGES.index(current_stage)
+
+    # Restart to an earlier or same stage is always allowed
+    if requested_index <= current_index:
+        return None
+
+    # Can only advance one step at a time
+    if requested_index == current_index + 1:
+        return None
+
+    return (
+        "Cannot skip from '" + current_stage + "' to '" + requested_stage + "'. "
+        "Next valid stage: " + ML_STAGES[current_index + 1]
+    )
+
+
+def _reset_ml_state_from_stage(session, stage: str) -> None:
+    """
+    Reset all ML state fields for stages after the given stage.
+
+    When a user restarts from an earlier stage, all subsequent state becomes
+    invalid and must be cleared. For example, restarting from "target" resets
+    features, problem_type, and model_choice.
+
+    Each field is associated with the stage that sets it:
+    - target stage sets: ml_target_column, ml_problem_type
+    - features stage sets: ml_features
+    - model stage sets: ml_model_choice
+
+    When restarting at stage N, all fields set by stages after N are cleared.
+
+    Mutates the session in place.
+    """
+    stage_index = ML_STAGES.index(stage)
+
+    # Clear fields set by the "features" stage and later
+    if stage_index < ML_STAGES.index("features"):
+        session.ml_features = None
+        session.ml_problem_type = None
+
+    # Clear fields set by the "model" stage and later
+    if stage_index < ML_STAGES.index("model"):
+        session.ml_model_choice = None
+
+
+def _get_first_dataframe(session) -> tuple:
+    """
+    Return the (name, DataFrame) for the first DataFrame in the session.
+
+    Single-DataFrame for MVP — defaults to the first/only entry.
+
+    Failure modes: raises StopIteration if session has no DataFrames.
+    """
+    name = next(iter(session.dataframes))
+    return name, session.dataframes[name]
+
+
+def _build_ml_prompt(session, stage: str, user_input: str, df) -> str:
+    """
+    Route to the appropriate prompt builder based on the ML stage.
+
+    Combines the stage-specific prompt with user input as context.
+    Returns the complete system prompt for the LLM call.
+
+    Failure modes: raises ValueError for unknown stages (should not happen
+    after validation).
+    """
+    if stage == "target":
+        return build_target_selection_prompt(df)
+
+    if stage == "features":
+        problem_type = session.ml_problem_type or infer_problem_type(df, session.ml_target_column)
+        return build_feature_selection_prompt(df, session.ml_target_column, problem_type)
+
+    if stage == "preprocessing":
+        return build_preprocessing_prompt(df, session.ml_target_column, session.ml_features)
+
+    if stage == "model":
+        problem_type = session.ml_problem_type or PROBLEM_TYPE_CLASSIFICATION
+        return build_model_selection_prompt(problem_type, df.shape)
+
+    if stage == "training":
+        return build_training_prompt(
+            session.ml_target_column,
+            session.ml_features,
+            session.ml_model_choice,
+            session.ml_problem_type,
+        )
+
+    if stage == "explanation":
+        # The explanation stage uses the training result from conversation history.
+        # If there's no training output yet, use the user's input as context.
+        last_training_output = user_input
+        return build_explanation_prompt(last_training_output)
+
+    raise ValueError("Unknown ML stage: " + stage)
+
+
+def _update_ml_session_state(session, stage: str, parsed: dict, df) -> None:
+    """
+    Update session ML state based on the completed stage and LLM response.
+
+    Extracts stage-specific fields from the parsed response and stores them
+    on the session. Also infers problem type when the target is selected.
+
+    Mutates the session in place.
+    """
+    session.ml_stage = stage
+
+    if stage == "target":
+        target = parsed.get("target_column", "")
+        session.ml_target_column = target
+        if target and str(target) in df.columns:
+            session.ml_problem_type = infer_problem_type(df, target)
+
+    elif stage == "features":
+        session.ml_features = parsed.get("features")
+
+    elif stage == "model":
+        session.ml_model_choice = parsed.get("model_choice")
+
+
+@app.post("/api/ml-step")
+def ml_step(request: MlStepRequest):
+    """
+    SSE-streaming Guided ML endpoint. Drives the multi-stage ML workflow:
+    target selection → feature selection → preprocessing → model selection →
+    training/evaluation → explanation.
+
+    Each request specifies a stage and user input. The endpoint validates
+    stage progression, builds a stage-appropriate prompt, calls the LLM,
+    optionally executes generated code (training stage), and streams back
+    the results.
+
+    SSE event types:
+      explanation — LLM's explanation text for this stage
+      result      — code execution output (training stage only) as JSON
+      ml_state    — updated ML state fields as JSON
+      error       — error message if something fails
+      done        — signals end of stream
+
+    PRD ref: #5 (Guided ML)
+    Tests: backend/tests/test_ml_workflow.py
+    """
+    session = session_store.get(request.session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "session_not_found",
+                "detail": "Session not found or has expired.",
+            },
+        )
+
+    if not request.user_input.strip():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "empty_user_input",
+                "detail": "User input cannot be empty.",
+            },
+        )
+
+    # Validate stage progression before starting the SSE stream.
+    # Returns a non-streaming error response so the frontend can handle it cleanly.
+    validation_error = _validate_ml_stage_progression(session.ml_stage, request.stage)
+    if validation_error is not None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_stage_progression",
+                "detail": validation_error,
+            },
+        )
+
+    def event_generator():
+        _df_name, df = _get_first_dataframe(session)
+
+        # Reset state for stages after the requested stage when restarting
+        _reset_ml_state_from_stage(session, request.stage)
+
+        system_prompt = _build_ml_prompt(
+            session, request.stage, request.user_input, df,
+        )
+        messages = [{"role": "user", "content": request.user_input}]
+
+        logger.info(
+            "ML step request: session=%s stage=%s user_input_length=%d",
+            request.session_id, request.stage, len(request.user_input),
+        )
+
+        try:
+            raw_response = call_llm_chat(
+                system_prompt, messages, session.api_key, session.provider, session.model,
+            )
+        except Exception as exc:
+            logger.error("LLM call failed during ML step: %s", exc)
+            yield _sse_event("error", "LLM call failed: " + str(exc))
+            yield _sse_event("done", "")
+            return
+
+        parsed = parse_ml_step_response(raw_response)
+
+        if "error" in parsed:
+            yield _sse_event("error", parsed["error"])
+            yield _sse_event("done", "")
+            return
+
+        yield _sse_event("explanation", parsed.get("explanation", ""))
+
+        # Training stage: execute the generated code
+        exec_result: dict | None = None
+        if request.stage == "training" and parsed.get("code"):
+            exec_result = execute_code(parsed["code"], session.exec_namespace)
+
+            if exec_result["error"]:
+                yield _sse_event("error", exec_result["error"])
+            else:
+                result_payload = json.dumps({
+                    "stdout": exec_result["stdout"],
+                    "figures": exec_result["figures"],
+                })
+                yield _sse_event("result", result_payload)
+
+        # Update session state based on the completed stage
+        _update_ml_session_state(session, request.stage, parsed, df)
+
+        # Stream the updated ML state so the frontend can update its UI
+        ml_state_payload = json.dumps({
+            "stage": session.ml_stage,
+            "target_column": session.ml_target_column,
+            "features": session.ml_features,
+            "problem_type": session.ml_problem_type,
+            "model_choice": session.ml_model_choice,
+        })
+        yield _sse_event("ml_state", ml_state_payload)
+
+        # Append to conversation history for LLM context continuity
+        session.conversation_history.append({
+            "role": "user",
+            "content": "[ML " + request.stage + "] " + request.user_input,
+        })
+        session.conversation_history.append({
+            "role": "assistant",
+            "content": parsed.get("explanation", ""),
+        })
+
+        _append_to_code_history(
+            session, parsed["explanation"], parsed.get("code", ""), exec_result,
+        )
+
+        yield _sse_event("done", "")
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
