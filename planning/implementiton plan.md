@@ -21,7 +21,7 @@
 | 3 | Sandboxed executor | Foundation | High | 1 | — | ✅ Done |
 | 4 | File upload endpoint | Foundation | Medium | 2, 3 | #1 Upload | ✅ Done |
 | 5 | Frontend scaffolding | Foundation | Low | 1 | — | ✅ Done |
-| 6 | BYOK setup | Vertical | Low | 4, 5 | #8 BYOK | |
+| 6 | BYOK setup | Vertical | Low | 4, 5 | #8 BYOK | ✅ Done |
 | 7 | Initial summary | Vertical | Medium | 6 | #2 Initial summary | |
 | 8 | Q&A backend | Vertical | High | 7 | #3 Conversational Q&A | |
 | 9 | Q&A frontend | Vertical | High | 8, 5 | #3 Conversational Q&A | |
@@ -1797,7 +1797,7 @@ Manual verification: On every screen (setup, upload, chat), click the help butto
 
 | Feature | Deferred to | Notes |
 |---------|-------------|-------|
-| Anthropic provider support | Post-MVP | `llm.py` should be structured so a second provider can be added without rewriting prompt construction |
+| Anthropic provider support | ~~Post-MVP~~ **Done in Step 6** | Both OpenAI and Anthropic are supported from Step 6. `llm.py` (Step 7) must dispatch on `session.provider` when constructing API calls. |
 | Multi-dataset joins | Not planned | PRD non-goal |
 | User accounts / persistence | Not planned | PRD non-goal |
 | CI pipeline | Post-MVP | Test suite runs locally; CI setup is a follow-up task |

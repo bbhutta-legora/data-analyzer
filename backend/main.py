@@ -6,6 +6,7 @@
 # Routes are added incrementally per the implementation plan:
 #   Step 4:  /api/upload   — file upload + session creation
 #   Step 6:  /api/validate-key — BYOK key validation
+#            /api/models        — curated model list per provider
 #   Step 7:  /api/upload (modified) — adds LLM summary call
 #   Step 8:  /api/chat     — SSE streaming Q&A
 #   Step 10: /api/clean    — data cleaning actions
@@ -18,7 +19,9 @@ import pandas as pd
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from providers import ANTHROPIC_VALIDATION_MODEL, AVAILABLE_MODELS, ProviderLiteral
 from session import SessionStore
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -103,11 +106,132 @@ def build_dataset_metadata(dataframes: dict[str, pd.DataFrame]) -> dict[str, dic
     return metadata
 
 
+# ── Key validation helpers ────────────────────────────────────────────────────
+
+def validate_openai_key(api_key: str) -> bool:
+    """
+    Check whether api_key is a working OpenAI key by listing available models.
+
+    Uses max_retries=0 so an invalid key fails fast rather than retrying.
+    Returns True if the key is accepted, False if the API returns an auth error.
+
+    Failure modes:
+    - openai.AuthenticationError → returns False (invalid key)
+    - Any other exception (network, timeout) → propagates to caller;
+      the route handler catches it and returns 500.
+    """
+    # Imported here rather than at module level so only the provider the user
+    # selects pays the SDK import cost — both SDKs are large and slow to import.
+    import openai
+    try:
+        openai.OpenAI(api_key=api_key, max_retries=0).models.list()
+        return True
+    except openai.AuthenticationError:
+        return False
+
+
+def validate_anthropic_key(api_key: str) -> bool:
+    """
+    Check whether api_key is a working Anthropic key by sending a minimal message.
+
+    max_tokens=1 keeps the check cheap — we only care about auth, not content.
+    Returns True if the key is accepted, False if the API returns an auth error.
+
+    Failure modes:
+    - anthropic.AuthenticationError → returns False (invalid key)
+    - Any other exception (network, timeout) → propagates to caller;
+      the route handler catches it and returns 500.
+    """
+    # Imported here rather than at module level so only the provider the user
+    # selects pays the SDK import cost — both SDKs are large and slow to import.
+    import anthropic
+    try:
+        anthropic.Anthropic(api_key=api_key, max_retries=0).messages.create(
+            model=ANTHROPIC_VALIDATION_MODEL,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        return True
+    except anthropic.AuthenticationError:
+        return False
+
+
+# ── Request / response models ─────────────────────────────────────────────────
+
+class ValidateKeyRequest(BaseModel):
+    api_key: str
+    provider: ProviderLiteral
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/models")
+def get_available_models() -> JSONResponse:
+    """
+    Return the curated list of available models per provider.
+
+    The frontend calls this on the setup screen to populate the model dropdown.
+    Models are defined in providers.py — this endpoint is the bridge so the
+    frontend doesn't need to duplicate the list.
+    """
+    serialized = {
+        provider: [model.to_dict() for model in models]
+        for provider, models in AVAILABLE_MODELS.items()
+    }
+    return JSONResponse(status_code=200, content=serialized)
+
+
+@app.post("/api/validate-key")
+def validate_key(body: ValidateKeyRequest) -> JSONResponse:
+    """
+    Validate a provider API key by making a lightweight API call.
+
+    Strip whitespace from the key first so copy-paste artifacts don't cause
+    false rejections. Return 400 for an empty key (after stripping) so the
+    frontend can show a clear "enter your key" message rather than a provider
+    auth error.
+
+    PRD ref: #8 (BYOK) — key is validated here and stored in the session at
+    upload time (Step 7). Not stored server-side until a session is created.
+
+    Architecture ref: "BYOK" in planning/architecture.md
+    """
+    api_key = body.api_key.strip()
+
+    if not api_key:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "empty_api_key",
+                "detail": "API key cannot be empty. Enter your key and try again.",
+            },
+        )
+
+    is_valid = (
+        validate_openai_key(api_key)
+        if body.provider == "openai"
+        else validate_anthropic_key(api_key)
+    )
+
+    if not is_valid:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "valid": False,
+                "error": "invalid_api_key",
+                "detail": (
+                    f"The {body.provider} API key was rejected. "
+                    "Check that the key is correct and has not been revoked."
+                ),
+            },
+        )
+
+    return JSONResponse(status_code=200, content={"valid": True})
 
 
 @app.post("/api/upload")

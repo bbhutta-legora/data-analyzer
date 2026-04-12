@@ -46,6 +46,11 @@ class Session:
     code_history: list = field(default_factory=list)
     exec_namespace: dict = field(default_factory=dict)
     api_key: str = ""
+    # Provider and model are set alongside api_key when the user validates their key.
+    # All three are passed to llm.py on every LLM call so the correct SDK and
+    # model are used. Valid values are defined in providers.py.
+    provider: str = ""
+    model: str = ""
 
     def __post_init__(self) -> None:
         # Libraries come from sandbox_libraries.py — the single source of truth shared
@@ -68,7 +73,7 @@ class SessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
 
-    def create(self, dataframes: dict[str, pd.DataFrame], api_key: str = "") -> str:
+    def create(self, dataframes: dict[str, pd.DataFrame], api_key: str = "", provider: str = "", model: str = "") -> str:
         """
         Create a new session from a dict of named DataFrames and return its session_id.
 
@@ -89,6 +94,8 @@ class SessionStore:
             dataframes_original=original_copies,
             dataframes=working_copies,
             api_key=api_key,
+            provider=provider,
+            model=model,
         )
         self._sessions[session_id] = session
         return session_id

@@ -32,15 +32,17 @@ The most technically demanding operation is sandboxed execution of arbitrary LLM
 
 ### 3.1 Module Structure
 
-Five deep modules with simple interfaces. No sub-packages, no abstract base classes.
+Six deep modules with simple interfaces. No sub-packages, no abstract base classes.
 
 ```
 backend/
-├── main.py          # FastAPI app, route definitions, CORS
-├── session.py       # Session store, session lifecycle, state model
-├── llm.py           # Prompt construction, LLM API calls, response parsing
-├── executor.py      # Sandboxed exec(), figure capture, result packaging
-├── exporter.py      # Jupyter notebook (.ipynb) generation
+├── main.py              # FastAPI app, route definitions, CORS
+├── session.py           # Session store, session lifecycle, state model
+├── providers.py         # Supported providers, curated model catalog, validation model
+├── llm.py               # Prompt construction, LLM API calls, response parsing
+├── executor.py          # Sandboxed exec(), figure capture, result packaging
+├── exporter.py          # Jupyter notebook (.ipynb) generation
+├── sandbox_libraries.py # Single source of truth for exec namespace libraries
 ├── requirements.txt
 └── tests/
 ```
@@ -49,6 +51,8 @@ backend/
 
 **`main.py`** — FastAPI application. Defines all HTTP endpoints and the SSE streaming endpoint. Wires together the other modules. Handles CORS, file upload parsing, and request validation.
 
+**`providers.py`** — Single source of truth for LLM provider configuration. Defines `SUPPORTED_PROVIDERS`, `ProviderLiteral`, `AVAILABLE_MODELS` (a curated 3-tier catalog per provider: Frontier / Balanced / Fast), `get_default_model()`, and `ANTHROPIC_VALIDATION_MODEL`. The frontend fetches model data via `GET /api/models` rather than hardcoding it.
+
 **`session.py`** — Manages an in-memory dict of sessions keyed by session ID (UUID). Each session holds:
 - `dataframes_original`: immutable snapshots of all uploaded DataFrames, keyed by name (e.g. `{"sales": df, "costs": df}`)
 - `dataframes`: the current working copies, keyed by name; mutated by cleaning operations
@@ -56,6 +60,8 @@ backend/
 - `code_history`: list of `{code, explanation, result}` entries for notebook export
 - `exec_namespace`: the Python namespace dict used by the sandbox
 - `api_key`: the user's LLM API key (held in memory only)
+- `provider`: the provider the user selected (`"openai"` or `"anthropic"`)
+- `model`: the specific model the user selected (e.g. `"gpt-5.4-mini"`)
 
 For CSV uploads, `dataframes` contains a single entry keyed by the filename stem. For multi-sheet Excel uploads, it contains one entry per sheet. Each DataFrame is independently copied at creation time so mutations to one cannot affect others or their originals.
 
@@ -129,6 +135,8 @@ frontend/
 interface AppState {
   sessionId: string | null
   apiKey: string | null
+  provider: 'openai' | 'anthropic' | null
+  model: string | null        // e.g. "gpt-5.4-mini", "claude-sonnet-4-6"
   messages: Message[]
   isStreaming: boolean
   datasetInfo: DatasetInfo | null
@@ -148,6 +156,7 @@ interface AppState {
 
 | Operation | Method | Path | Format |
 |-----------|--------|------|--------|
+| Get available models | GET | `/api/models` | JSON |
 | Validate API key | POST | `/api/validate-key` | JSON |
 | Upload dataset | POST | `/api/upload` | multipart/form-data → JSON |
 | Chat question | POST | `/api/chat` | JSON → SSE stream |
@@ -206,7 +215,9 @@ Conversation history is sent as prior messages to maintain context.
 | 7 | LLM response structure | Structured JSON (`{code, explanation}`) |
 | 8 | Chart rendering | Server-side matplotlib/seaborn → base64 PNG |
 | 9 | Repo structure | Monorepo with `frontend/` and `backend/` |
-| 10 | Backend module design | 5 deep modules: main, session, llm, executor, exporter |
+| 10 | Backend module design | 6 deep modules: main, session, providers, llm, executor, exporter + sandbox_libraries |
+| 14 | LLM provider support | OpenAI and Anthropic (both built in from Step 6; not deferred) |
+| 15 | Model selection | Curated 3-tier catalog per provider (Frontier/Balanced/Fast); served via `GET /api/models`; `providers.py` is single source of truth |
 | 11 | Frontend state | Zustand |
 | 12 | Testing | pytest + Vitest |
 | 13 | Logging | Python `logging`, structured, human-readable |

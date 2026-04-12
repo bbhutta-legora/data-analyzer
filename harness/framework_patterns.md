@@ -447,3 +447,70 @@ def main():
 ```
 
 **Why this matters:** Tests often mock external dependencies, so missing `.env` loading won't surface until manual testing. Always load `.env` in the FastAPI startup or CLI entry point before any code that reads API keys.
+
+---
+
+## Git Worktrees
+
+This project uses `git worktree` to allow parallel work on different branches from separate directories. Worktrees share a single `.git` database but have independent working trees. Untracked directories (`venv/`, `node_modules/`, `__pycache__/`) are **not** shared — each worktree needs its own.
+
+### Each Worktree Gets Its Own Virtual Environment
+
+Create a local venv in the worktree rather than pointing back to the original project's venv. Sharing a venv across worktrees causes dependency leakage between branches and forces a path-discovery scavenger hunt at the start of every session.
+
+#### Setting up a new worktree for backend work
+
+```bash
+cd /path/to/worktree/backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+After this, `source backend/venv/bin/activate` works from the worktree root — no special paths needed.
+
+#### ❌ Anti-Pattern: Sharing the original project's venv
+```bash
+# BAD: fragile path, dependency changes leak across branches,
+# every new session starts with "where is the venv?"
+ORIGINAL_ROOT=$(git worktree list | head -1 | awk '{print $1}')
+source "$ORIGINAL_ROOT/backend/venv/bin/activate"
+```
+
+#### ✓ Pattern: Local venv per worktree
+```bash
+# GOOD: self-contained, discoverable, isolated
+source backend/venv/bin/activate
+```
+
+**Why this matters:** If branch A adds `anthropic>=0.25` and branch B hasn't updated `requirements.txt` yet, a shared venv silently makes the package available on branch B — hiding a missing dependency that will break in CI or for other developers. A local venv per worktree catches this immediately.
+
+---
+
+### Node Modules Are Also Not Shared
+
+`node_modules/` is untracked and won't exist in a new worktree. Run `npm install` in the worktree's `frontend/` directory before any frontend work.
+
+```bash
+cd /path/to/worktree/frontend && npm install
+```
+
+---
+
+### File Paths: Always Use the Worktree Path
+
+Code runs from the worktree directory, not the original. All file paths in shell commands, test configurations, and imports must reference the worktree.
+
+#### ❌ Anti-Pattern: Running commands from the original project
+```bash
+# BAD: tests the wrong checkout
+cd /original/backend && pytest
+```
+
+#### ✓ Pattern: All work happens in the worktree
+```bash
+# GOOD: venv and code are both in the worktree
+cd /worktree/backend
+source venv/bin/activate
+pytest tests/ -v
+```

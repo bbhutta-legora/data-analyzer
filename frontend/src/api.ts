@@ -4,11 +4,13 @@
 // Architecture ref: "Communication Protocol" in planning/architecture.md §5
 //
 // Endpoint-specific functions are added per step:
-//   Step 6:  validateApiKey()
+//   Step 6:  validateApiKey()          ← implemented here
 //   Step 7:  uploadFile()
 //   Step 8:  streamChatQuestion() (SSE)
 //   Step 10: applyCleaningAction()
 //   Step 14: exportNotebook()
+
+import type { Provider } from "./store";
 
 // API_BASE is empty — requests go to /api/* which Vite proxies to the backend.
 // This avoids hardcoding the backend port in application code.
@@ -53,4 +55,46 @@ export async function apiFetch<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+// ── Step 6: BYOK ─────────────────────────────────────────────────────────────
+
+export interface ModelInfo {
+  model_id: string;
+  label: string;
+  tier: string;
+  description: string;
+  is_default: boolean;
+}
+
+/**
+ * Fetch the curated list of available models per provider from the backend.
+ * Called once on setup screen mount — the backend (providers.py) is the single
+ * source of truth so the frontend never hardcodes model identifiers.
+ */
+export async function fetchAvailableModels(): Promise<
+  Record<string, ModelInfo[]>
+> {
+  return apiFetch<Record<string, ModelInfo[]>>("/api/models", {
+    method: "GET",
+  });
+}
+
+/**
+ * Validate a provider API key against the backend.
+ *
+ * Throws ApiError on network failure, empty key (400), or invalid key (401).
+ * Returns {valid: true} on success — the caller stores the key, provider, and
+ * model in Zustand and transitions to the upload screen.
+ *
+ * PRD ref: #8 (BYOK)
+ */
+export async function validateApiKey(
+  apiKey: string,
+  provider: Provider
+): Promise<{ valid: boolean }> {
+  return apiFetch<{ valid: boolean }>("/api/validate-key", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey, provider }),
+  });
 }
