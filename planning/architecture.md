@@ -62,6 +62,11 @@ backend/
 - `api_key`: the user's LLM API key (held in memory only)
 - `provider`: the provider the user selected (`"openai"` or `"anthropic"`)
 - `model`: the specific model the user selected (e.g. `"gpt-5.4-mini"`)
+- `ml_stage`: current stage in the guided ML workflow (`None` when not started; one of `"target"`, `"features"`, `"preprocessing"`, `"model"`, `"training"`, `"explanation"`)
+- `ml_target_column`: the column the user chose to predict
+- `ml_features`: list of feature column names selected for the model
+- `ml_problem_type`: `"classification"` or `"regression"`, inferred from the target column
+- `ml_model_choice`: the sklearn model identifier chosen by the user (e.g. `"random_forest"`)
 
 For CSV uploads, `dataframes` contains a single entry keyed by the filename stem. For multi-sheet Excel uploads, it contains one entry per sheet. Each DataFrame is independently copied at creation time so mutations to one cannot affect others or their originals.
 
@@ -69,12 +74,23 @@ Sessions are created on file upload and discarded on explicit close or server re
 
 **`llm.py`** — Constructs prompts that include dataset metadata (column names, dtypes, shape, sample rows) and conversation history. Sends requests to the LLM API. Parses the structured JSON response into a typed object with `code`, `explanation`, and optional `cleaning_suggestions` fields. The system prompt instructs the LLM to proactively surface data quality issues relevant to the current question.
 
-Key functions (Step 8):
+Key functions (Step 8 — Chat):
 - `build_chat_system_prompt(dataframes)` — builds the chat system prompt with dataset metadata, libraries, and response format instructions
 - `build_chat_messages(question, conversation_history)` — builds the messages array (history + new question); system prompt is separate because OpenAI and Anthropic handle it differently
 - `parse_chat_response(raw)` — parses JSON response into `{code, explanation, cleaning_suggestions}`
 - `truncate_history(history, max_tokens)` — sliding-window truncation dropping oldest messages first; always preserves the most recent message; uses word_count * 1.3 token estimation
 - `call_llm_chat(system_prompt, messages, api_key, provider, model)` — multi-turn LLM call dispatching to provider-specific helpers that handle system prompt differences (OpenAI: system message in array; Anthropic: separate `system` parameter)
+
+Key functions (Step 12 — Guided ML):
+- `infer_problem_type(df, target_column)` — pure heuristic (no LLM call): object/bool dtype or <= 10 unique numeric values → classification, otherwise regression. Uses `PROBLEM_TYPE_CLASSIFICATION` / `PROBLEM_TYPE_REGRESSION` constants.
+- `build_target_selection_prompt(df)` — lists all columns with dtypes, unique counts, sample values
+- `build_feature_selection_prompt(df, target_column, problem_type)` — lists non-target columns; includes correlations with target for numeric columns
+- `build_preprocessing_prompt(df, target_column, features)` — details encoding needs, scaling, missing values per column
+- `build_model_selection_prompt(problem_type, df_shape)` — pure function taking problem type and shape tuple (no DataFrame dependency)
+- `build_training_prompt(target_column, features, model_choice, problem_type)` — generates sklearn training code request with problem-type-specific metrics
+- `build_explanation_prompt(training_result)` — asks LLM to explain training output in plain English
+- `parse_ml_step_response(raw)` — generic parser for all ML stages; passes through all fields, defaults `explanation` to empty string
+- `ML_STAGES` — ordered list defining the stage progression: `["target", "features", "preprocessing", "model", "training", "explanation"]`
 
 **`executor.py`** — Runs LLM-generated code via `exec()` in a restricted namespace. The namespace is pre-populated with `pandas`, `numpy`, `matplotlib`, `seaborn`, `sklearn`, and `dfs` — a dict of all session DataFrames keyed by name. Captures matplotlib figures as base64 PNG by hooking `plt.savefig()` to a bytes buffer. Captures printed output and expression results. Returns a structured result object with `stdout`, `figures` (list of base64 strings), `error` (if any), and `dataframe_changed` flag.
 
@@ -110,6 +126,19 @@ Key functions (Step 8):
 1. Frontend requests notebook download
 2. `exporter.py` builds `.ipynb` from session's code history
 3. File returned as a download response
+
+**Guided ML step (SSE — Step 12):**
+1. Frontend POSTs `{session_id, stage, user_input}` to `/api/ml-step`
+2. `main.py` validates stage progression against `ML_STAGES` order (first stage must be `"target"`; can advance one step or restart to any earlier/same stage; cannot skip ahead)
+3. On restart to an earlier stage, all session ML state for subsequent stages is reset
+4. `main.py` routes to the stage-specific prompt builder in `llm.py` (6 builders, one per stage)
+5. LLM response parsed by `parse_ml_step_response` — a single generic parser for all stages
+6. For the `training` stage only, `executor.py` runs the generated code in the session namespace
+7. Session ML state updated (`ml_stage`, `ml_target_column`, `ml_features`, `ml_problem_type`, `ml_model_choice`) based on the completed stage
+8. SSE events streamed: `explanation`, optionally `result` (training only), `ml_state` (current ML state snapshot), `done`
+9. Conversation history and code history updated (ML messages prefixed with `[ML <stage>]` in conversation history)
+
+MVP constraint: only the first DataFrame in the session is used for ML (single-DataFrame MVP). Multi-DataFrame support is deferred.
 
 ## 4. Frontend Architecture
 
@@ -167,6 +196,7 @@ interface AppState {
 | Validate API key | POST | `/api/validate-key` | JSON |
 | Upload dataset | POST | `/api/upload` | multipart/form-data → JSON |
 | Chat question | POST | `/api/chat` | JSON → SSE stream |
+| Guided ML step | POST | `/api/ml-step` | JSON → SSE stream |
 | Apply cleaning action | POST | `/api/clean` | JSON |
 | Export notebook | GET | `/api/export/{session_id}` | `.ipynb` file download |
 
@@ -175,6 +205,13 @@ SSE event types for the chat stream:
 - `result`: execution output (figures, tables, stdout)
 - `cleaning_suggestions`: array of suggested fixes, each with a description and options
 - `error`: execution failure with plain-English description
+- `done`: stream complete
+
+SSE event types for the ML step stream:
+- `explanation`: LLM's explanation/recommendation for this stage
+- `result`: code execution output (training stage only) — `{stdout, figures}` JSON
+- `ml_state`: current ML state snapshot — `{stage, target_column, features, problem_type, model_choice}` JSON
+- `error`: error message if LLM call or parsing fails
 - `done`: stream complete
 
 ## 6. Sandboxed Execution
@@ -192,6 +229,8 @@ Resource limits: execution timeout via `multiprocessing.Process` + `process.kill
 
 ## 7. LLM Prompting
 
+### 7.1 Chat Prompts
+
 The system prompt includes:
 - Role definition (data analysis assistant for junior data scientists)
 - Response format instructions (return JSON with `code`, `explanation`, and optional `cleaning_suggestions` fields)
@@ -202,6 +241,27 @@ The system prompt includes:
 Conversation history is sent as prior messages to maintain context.
 
 **Error retry flow:** if `executor.py` returns an error, `llm.py` appends an error message to the conversation (including the traceback) and re-prompts the LLM once. If the retry also fails, the error is returned to the user with a suggestion to rephrase.
+
+### 7.2 ML Prompt Chain (Step 12)
+
+The guided ML workflow uses a 6-stage prompt chain. Each stage has its own prompt builder but all share a common pattern: role definition, stage-specific context (column metadata, prior selections), the sandbox library list, task instructions, and stage-specific JSON response format instructions.
+
+**Stage progression:** `target` → `features` → `preprocessing` → `model` → `training` → `explanation`
+
+Each stage's response format includes `"next_stage"` to guide the frontend, plus stage-specific fields:
+
+| Stage | Key response fields | State updated |
+|-------|-------------------|---------------|
+| target | `target_column`, `next_stage` | `ml_target_column`, `ml_problem_type` (inferred) |
+| features | `features`, `next_stage` | `ml_features` |
+| preprocessing | `preprocessing_steps`, `next_stage` | (advisory only) |
+| model | `model_choice`, `next_stage` | `ml_model_choice` |
+| training | `code`, `next_stage` | code executed by `executor.py` |
+| explanation | `explanation`, `next_stage: null` | (final stage) |
+
+**Problem type inference:** `infer_problem_type` is a pure heuristic (no LLM call) — fast, deterministic, and testable. It runs when the target is selected and the result is stored on the session for use by subsequent stages.
+
+**Single parser:** `parse_ml_step_response` is generic — it passes through all fields from the LLM response rather than extracting stage-specific fields. The endpoint handler (`_update_ml_session_state`) reads the fields it needs based on the current stage. This keeps the parser simple and avoids coupling it to the stage schema.
 
 ## 8. Observability
 
@@ -228,3 +288,5 @@ Conversation history is sent as prior messages to maintain context.
 | 11 | Frontend state | Zustand |
 | 12 | Testing | pytest + Vitest |
 | 13 | Logging | Python `logging`, structured, human-readable |
+| 16 | ML workflow architecture | 6-stage prompt chain with strict stage progression state machine; `infer_problem_type` as pure heuristic; single generic response parser; single-DataFrame MVP |
+| 17 | ML problem type inference | Deterministic heuristic (no LLM call): object/bool → classification, numeric with <= 10 unique → classification, else regression |

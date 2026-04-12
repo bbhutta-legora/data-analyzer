@@ -254,6 +254,63 @@ def run_code(code: str, namespace: dict) -> ExecutionResult:
 
 ---
 
+### Multi-Stage Prompt Chains with a Generic Parser
+
+When building a multi-stage LLM workflow where each stage returns different fields (e.g., stage 1 returns `target_column`, stage 2 returns `features`), prefer a single generic parser that passes through all fields rather than per-stage parsers.
+
+#### ✓ Pattern: Generic pass-through parser
+```python
+def parse_ml_step_response(raw: str) -> dict:
+    """Pass through all fields; each stage handler extracts what it needs."""
+    cleaned = strip_code_fences(raw)
+    parsed = json.loads(cleaned)
+    if "explanation" not in parsed:
+        parsed["explanation"] = ""  # safe default for the one universal field
+    return parsed
+```
+
+#### ❌ Anti-Pattern: Per-stage parsers
+```python
+# BAD: N parsers for N stages, each tightly coupled to the stage schema.
+# Adding a field to one stage requires finding the right parser to update.
+def parse_target_response(raw): ...
+def parse_feature_response(raw): ...
+def parse_model_response(raw): ...
+```
+
+**Why this matters:** Stage-specific parsers create tight coupling between the parser layer and the prompt schema. The generic parser delegates field extraction to the handler that knows the current stage — keeping the parse boundary thin and the stage-specific logic co-located with the state update.
+
+---
+
+### Prefer Deterministic Heuristics Over LLM Calls for Classifiable Inputs
+
+When the decision can be made reliably from data properties (e.g., dtype, unique value count, shape), use a pure heuristic function instead of an LLM call. Reserve LLM calls for tasks requiring judgment, natural language understanding, or domain reasoning.
+
+#### ✓ Pattern: Pure heuristic for problem type inference
+```python
+CLASSIFICATION_UNIQUE_VALUE_THRESHOLD = 10
+
+def infer_problem_type(df, target_column: str) -> str:
+    """Deterministic, fast, testable — no LLM call needed."""
+    col = df[target_column]
+    if col.dtype == "object" or col.dtype == "bool":
+        return "classification"
+    if col.nunique() <= CLASSIFICATION_UNIQUE_VALUE_THRESHOLD:
+        return "classification"
+    return "regression"
+```
+
+#### ❌ Anti-Pattern: LLM call for a deterministic decision
+```python
+# BAD: slow, non-deterministic, costs tokens, and the LLM might get it wrong
+prompt = f"Is column '{target}' with dtype {dtype} a classification or regression target?"
+result = call_llm(prompt, ...)
+```
+
+**Why this matters:** LLM calls add latency, cost, and non-determinism. For decisions that can be made from structured data properties with clear rules, a pure function is faster, cheaper, always testable, and never hallucinates.
+
+---
+
 ### Model Version Management
 
 When hardcoding LLM model identifiers in `llm.py`:
