@@ -5,9 +5,9 @@ Keep the overall architecture simple. Stick to a monorepo for simpler apps or a 
 Observability will be paramount for our ability to move quickly. This has two complementary aspects:
 
 1. **Testing** (pre-deployment): Robust unit, integration, and functional tests verify correctness before code runs. See `harness/TEST-STRATEGY.md`.
-2. **Runtime diagnosis** (during execution): A per-session context buffer tracks recent operations in memory. When an error reaches a user-facing boundary, an LLM troubleshooter agent diagnoses it from that context — no persistent log infrastructure needed. See `harness/OBSERVABILITY-STRATEGY.md`.
+2. **Runtime diagnosis** (during execution): A per-session context buffer tracks recent operations in memory. When an error occurs, an LLM troubleshooter agent diagnoses it from that context — no persistent log infrastructure needed. See `harness/OBSERVABILITY-STRATEGY.md`.
 
-Ease of trace review is a top priority. The troubleshooter produces plain-English diagnoses, not raw stack traces or log dumps. The developer sees what went wrong, why, and what to try next.
+The troubleshooter receives raw data — full stack traces, actual LLM responses, generated code, execution output. It does the synthesis. Its output (PR descriptions, diagnosis summaries) is always plain English aimed at developers. Raw in, plain English out.
 
 Avoid creating abstractions until you have 3+ concrete use cases. Note that this goes against strict enforcement of the DRY principle. 
 

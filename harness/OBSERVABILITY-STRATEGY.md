@@ -59,11 +59,11 @@ class ContextEntry:
     metadata: dict              # Operation-specific context (see per-operation guidance below)
 ```
 
-### Why actual data, not summaries
+### Raw in, plain English out
 
-The troubleshooter's job isn't just to classify an error — it's to write a PR with reproduction steps and a fix. A summary like "Asked for Python code to visualize revenue trends" doesn't let the troubleshooter write "ask this exact question to reproduce the bug." The actual user question does.
+The troubleshooter is an LLM — it doesn't need pre-digested summaries to understand what happened. Feed it the raw data: full stack traces, actual LLM responses, the exact generated code, the real execution output. The troubleshooter does the synthesis. The plain-English translation happens in its *output* (PR descriptions, diagnosis summaries for developers), not in its *input*.
 
-Similarly, if the LLM returned a list instead of a dict and our code threw `AttributeError` calling `.get()`, a summary of "Returned valid JSON" gives the troubleshooter nothing to work with. The actual response text shows the shape mismatch immediately.
+Pre-summarizing the buffer data means a human decided what's important before the error even occurred. That's the wrong time to make that call — the troubleshooter needs to see what's actually there and decide for itself what matters in the context of this specific failure.
 
 **Memory is not the constraint.** The buffer holds at most 20 entries for one session's lifetime. Even with full LLM responses, that's a few hundred KB — negligible for an in-memory session that already holds entire DataFrames.
 
