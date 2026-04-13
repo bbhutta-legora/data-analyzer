@@ -51,9 +51,9 @@ Whenever a step creates or significantly changes frontend UI, insert a **Phase A
 
 | Phase | Name | What happens |
 |-------|------|-------------|
-| A0 | Wireframes | Present 2–3 markdown wireframe options showing layout, element placement, and content hierarchy. Wait for the user to pick a direction (or request changes) before proceeding. |
+| A0 | Wireframes | Present 2–3 wireframe options showing layout, element placement, and content hierarchy. Wait for the user to pick a direction (or request changes) before proceeding. |
 
-Why this matters: frontend components are primarily *visual* artifacts. Reviewing a wireframe catches layout and UX issues far earlier than reviewing test cases or code. The wireframe doesn't need to be pixel-perfect — it shows spatial relationships, element grouping, and interaction flow using ASCII/markdown box diagrams.
+Why this matters: frontend components are primarily *visual* artifacts. Reviewing a wireframe catches layout and UX issues far earlier than reviewing test cases or code.
 
 The wireframe phase applies whenever the step:
 - Creates new UI components (modals, panels, screens, cards)
@@ -63,6 +63,56 @@ The wireframe phase applies whenever the step:
 This includes mixed backend+frontend steps (e.g., Step 7 creates both `llm.py` and `FileUpload.tsx` / `DataSummary.tsx`). The backend can proceed through the standard phases (A–F) without wireframes, but the frontend components must go through A0 before implementation.
 
 Skip A0 when the frontend change is purely behavioral with no visible layout change (e.g., wiring a click handler to an existing button, changing a store action).
+
+#### Interactive HTML mockup for Phase A (UI steps)
+
+When a step involves frontend UI, Phase A (test spec) must include an **interactive HTML mockup** alongside the text-based behavior list. The mockup replaces text-only wireframes as the primary review artifact for UI behaviors.
+
+**What the mockup is:**
+
+A single self-contained `.html` file (written to the workspace root as a temporary artifact, deleted after review) that the user opens in a browser. It is a clickthrough prototype — not a functional app — that demonstrates each testable behavior visually.
+
+**Structure:**
+
+- **Left panel:** A framed mockup of the app, rendered scene-by-scene. Each scene shows a specific state (e.g., "wizard target stage with nothing selected," "features stage after target confirmed"). Interactive elements relevant to the current behavior are highlighted with a visual glow.
+- **Right sidebar:** The full list of behaviors from the test spec. Behaviors demonstrated in the current scene are highlighted; others are faded. Each behavior shows its ID, description, and risk level.
+- **Navigation:** Prev/Next buttons and arrow-key support to step through scenes.
+
+**Why this matters:**
+
+- Behaviors like "Confirm is disabled until a selection is made" are immediately obvious in a visual mockup but easy to misunderstand in text.
+- The clickthrough flow shows state transitions (collapsed cards, loading states, error boxes) that ASCII diagrams struggle to convey.
+- Reviewing a mockup catches UX issues (element placement, flow, missing states) that text specs miss.
+
+**When to use:**
+
+Use the interactive HTML mockup whenever Phase A covers UI behaviors — i.e., whenever Phase A0 (wireframes) was triggered for the step.
+
+**Lifecycle:**
+
+The mockup file is temporary. Delete it from the workspace after the user confirms the test spec. It is not committed to version control.
+
+#### Visual artifacts for Phase A (general preference)
+
+There is a general preference for visual artifacts when presenting test specs for review. Seeing behaviors is faster and more reliable than reading about them. The format scales to the complexity:
+
+| Step type | Visual artifact | Format |
+|-----------|----------------|--------|
+| **Frontend UI** | Required | Interactive HTML mockup (see above) |
+| **Backend with branching/state/sequencing** | Recommended | Markdown diagrams in the chat (ASCII state machines, event timelines, error decision trees) |
+| **Backend with simple input→output** | Skip | Text-based behavior list is sufficient |
+
+**When to produce a markdown diagram for backend steps:**
+
+Use a markdown diagram when the behaviors involve:
+- **State machines** — stage progression, session lifecycle, workflow transitions. Draw the states and edges, annotate which behaviors are tested on which transitions.
+- **Event sequences** — SSE streams, multi-step async flows. Show the timeline of events with payload shapes.
+- **Error decision trees** — endpoints with multiple branching error conditions. Show the tree from request → condition checks → response outcomes.
+- **Data transformation pipelines** — multi-stage parsing or processing. Show the data shape at each step.
+
+Skip the diagram when behaviors are simple input→output mappings (e.g., "given this history, `build_notebook` returns valid JSON"). The "When [X], [Y]" text format is sufficient for those.
+
+Unlike the HTML mockup for frontend steps, backend diagrams are **inline markdown in the chat** — no separate file needed. They supplement the text-based behavior list rather than replacing it.
 
 ### 4. Implementation approach
 

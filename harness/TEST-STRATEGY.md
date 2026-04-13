@@ -58,6 +58,14 @@ Group related tests under a shared heading so you can approve or reject a whole 
 
 **You review this list.** Remove tests you don't care about. Add cases the AI missed. Confirm each sentence matches your intent for the behavior.
 
+**Visual artifacts:** There is a preference for visual artifacts when reviewing test specs — seeing behaviors is faster than reading about them. The format depends on the step type:
+
+- **Frontend UI steps:** Deliver an **interactive HTML mockup** (clickthrough prototype) alongside the text list. See `harness/execution_plan_principles.md` § "Interactive HTML mockup for Phase A" for the full specification.
+- **Backend steps with branching, state, or sequencing:** Include **markdown diagrams** (ASCII state machines, event timelines, error decision trees) inline in the chat to supplement the text list. Use these when they make behaviors clearer, skip them for simple input→output tests.
+- **Simple backend steps:** The text-based behavior list alone is sufficient.
+
+See `harness/execution_plan_principles.md` § "Visual artifacts for Phase A" for the full guidance on when each format applies.
+
 Only proceed to Step 3 after you've confirmed.
 
 ### Step 3: Write the test descriptions (you, optional)

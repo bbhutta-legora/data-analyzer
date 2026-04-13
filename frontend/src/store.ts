@@ -71,6 +71,11 @@ interface AppState {
   datasetInfo: DatasetInfo | null;
   currentScreen: Screen;
   hasAppliedCleaning: boolean;
+  // ── ML Wizard (Step 13) ──────────────────────────────────────────────────
+  // True while the wizard is visible in the chat stream. Chat input and the
+  // "Build a Model" button are disabled during this time to prevent
+  // concurrent wizard sessions and backend state corruption.
+  mlWizardActive: boolean;
 
   setApiKey: (key: string) => void;
   setProvider: (provider: Provider) => void;
@@ -83,6 +88,8 @@ interface AppState {
   addMessage: (message: Message) => void;
   updateLastAssistantMessage: (fields: Partial<Message>) => void;
   setStreaming: (streaming: boolean) => void;
+  startMlWizard: () => void;
+  resetMlWizard: () => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -95,6 +102,7 @@ export const useStore = create<AppState>((set, get) => ({
   datasetInfo: null,
   currentScreen: "setup",
   hasAppliedCleaning: false,
+  mlWizardActive: false,
 
   setApiKey: (key) => set({ apiKey: key }),
   setProvider: (provider) => set({ provider }),
@@ -135,4 +143,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
+  startMlWizard: () => set({ mlWizardActive: true }),
+  resetMlWizard: () => set({ mlWizardActive: false }),
 }));
