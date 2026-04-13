@@ -18,6 +18,12 @@ Concretely: present behaviors in plain English (Step 1) and specific test cases 
 
 ---
 
+## Runtime Observability
+
+When writing code at system boundaries (LLM calls, sandboxed execution, file parsing, data cleaning), add a context buffer entry so the troubleshooter agent can diagnose runtime failures. **Follow `harness/OBSERVABILITY-STRATEGY.md`** for what to capture and what to leave out. Do not add `logger.info()` calls for per-request operation tracking — route that through the context buffer instead.
+
+---
+
 ## Verification Guidance
 
 After implementing any code change, **explicitly tell the user how to verify it works**. This should include:

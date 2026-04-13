@@ -38,6 +38,7 @@ Convert the specific experience into a general principle:
 |-----------------|--------------|
 | Coding patterns, anti-patterns, style | `harness/coding_principles.md` |
 | Framework-specific gotchas (FastAPI, LLM, asyncio) | `harness/framework_patterns.md` |
+| Runtime diagnosis, error context, troubleshooter patterns | `harness/OBSERVABILITY-STRATEGY.md` |
 | Architecture decisions, module boundaries | `planning/architecture.md` |
 | Product requirements, scope decisions | `planning/PRD.md` |
 | Task sequencing, milestone dependencies | `planning/implementiton plan.md` |

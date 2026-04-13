@@ -11,9 +11,10 @@ Before starting work, read the documents listed for the matching task type. When
 
 | Task | Read these documents |
 |------|---------------------|
-| **Writing or implementing code** | `harness/execution_plan_principles.md`, `harness/coding_principles.md`, `harness/framework_patterns.md`, `harness/TEST-STRATEGY.md`, `harness/code_review_patterns.md`, `harness/reflection.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
+| **Writing or implementing code** | `harness/execution_plan_principles.md`, `harness/coding_principles.md`, `harness/framework_patterns.md`, `harness/TEST-STRATEGY.md`, `harness/OBSERVABILITY-STRATEGY.md`, `harness/code_review_patterns.md`, `harness/reflection.md`, `planning/architecture.md`, `planning/implementiton plan.md` |
 | **Reviewing code** | `harness/code_review_patterns.md` |
 | **Writing or running tests** | `harness/TEST-STRATEGY.md`, `harness/coding_principles.md` |
+| **Adding error handling, logging, or tracing** | `harness/OBSERVABILITY-STRATEGY.md`, `harness/code_review_patterns.md` (§16 Logging), `harness/coding_principles.md` |
 | **Writing or updating the PRD** | `harness/prd_principles.md`, `planning/PRD.md` |
 | **Architecture decisions or design** | `harness/architectural_principles.md`, `planning/architecture.md` |
 | **Writing or updating the implementation plan** | `harness/implementation_plan_principles.md`, `planning/implementiton plan.md` |
