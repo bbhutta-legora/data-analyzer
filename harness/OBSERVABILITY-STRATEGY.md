@@ -45,26 +45,46 @@ A per-session, in-memory list of recent operations. Each entry is a lightweight 
 
 ### What an entry contains
 
-Each entry captures one operation at a system boundary:
+Each entry captures one operation at a system boundary. Entries store **actual inputs and outputs** — not just summaries — because the troubleshooter needs real data to diagnose bugs and write reproduction steps for PRs.
 
 ```python
 @dataclass
 class ContextEntry:
     timestamp: str              # ISO 8601, for ordering
     operation: str              # e.g. "llm_call", "code_execution", "file_parse", "data_clean"
-    input_summary: str          # Brief description of what went in (NOT the full payload)
-    output_summary: str | None  # Brief description of what came out (None if it hasn't completed)
+    input_actual: str           # The actual input (user question, code to execute, filename)
+    output_actual: str | None   # The actual output (LLM response text, stdout, parsed shape)
     success: bool | None        # None while in-flight, True/False on completion
     error: str | None           # Error message + type if failed, None otherwise
     metadata: dict              # Operation-specific context (see per-operation guidance below)
 ```
 
+### Why actual data, not summaries
+
+The troubleshooter's job isn't just to classify an error — it's to write a PR with reproduction steps and a fix. A summary like "Asked for Python code to visualize revenue trends" doesn't let the troubleshooter write "ask this exact question to reproduce the bug." The actual user question does.
+
+Similarly, if the LLM returned a list instead of a dict and our code threw `AttributeError` calling `.get()`, a summary of "Returned valid JSON" gives the troubleshooter nothing to work with. The actual response text shows the shape mismatch immediately.
+
+**Memory is not the constraint.** The buffer holds at most 20 entries for one session's lifetime. Even with full LLM responses, that's a few hundred KB — negligible for an in-memory session that already holds entire DataFrames.
+
+### Bounding actual data
+
+Store actual data, but apply sensible length caps so a single entry can't dominate the buffer:
+
+| Field | Max length | Truncation strategy |
+|-------|-----------|---------------------|
+| `input_actual` (user question) | 2,000 chars | Truncate with `... [truncated]` suffix |
+| `input_actual` (LLM prompt) | Not stored — the troubleshooter reconstructs it from session state if needed |
+| `output_actual` (LLM response) | 10,000 chars | Truncate with suffix. Full responses rarely exceed this; if they do, the first 10k contains the JSON structure that matters for diagnosis |
+| `output_actual` (code execution stdout) | 5,000 chars | Truncate with suffix |
+| `output_actual` (generated code) | 5,000 chars | Store the full generated code from the LLM response's `code` field |
+
 ### What it does NOT contain
 
-- **Full LLM prompts or responses** — Too large. Summarize: "Asked for cleaning suggestions for 5 columns" / "Returned 3 suggestions in valid JSON."
-- **Full dataframes or datasets** — Reference by shape and column names only.
+- **Full LLM prompts** — These are large (system prompt + dataset metadata + conversation history) and can be reconstructed by the troubleshooter from the session's current state if needed. Storing them would dominate the buffer.
+- **Full dataframes or datasets** — Reference by shape, column names, and dtypes only. The actual data is in `session.dataframes`.
 - **API keys or credentials** — Never, under any circumstances.
-- **User PII** — The buffer holds operation metadata, not user data content.
+- **User PII** — The buffer holds operation data and user questions (needed for reproduction), but NOT the content of the user's dataset rows.
 
 ### Buffer sizing
 
@@ -88,63 +108,83 @@ Capture context entries at these boundaries, in priority order:
 
 Every call to the Anthropic/OpenAI API gets a context entry. This is the most common source of runtime failures (malformed responses, unexpected formats, refusals, rate limits).
 
+**Core fields:**
+- `input_actual`: The user's question that triggered this LLM call (their exact words)
+- `output_actual`: The raw LLM response text (capped at 10,000 chars). This is what gets parsed — if parsing fails, the troubleshooter needs to see the actual text to diagnose why
+
 **Metadata to capture:**
 - `model`: Which model was called
-- `purpose`: What the call was for ("analysis_query", "cleaning_suggestion", "code_generation")
-- `prompt_summary`: One sentence describing what was asked (NOT the full prompt)
+- `purpose`: What the call was for ("analysis_query", "cleaning_suggestion", "code_generation", "ml_step")
 - `response_format`: What format was expected ("json", "code", "text")
 - `parse_success`: Whether the response parsed into the expected format
+- `parsed_code`: The generated code extracted from the parsed response (if any). Stored separately from `output_actual` because the troubleshooter often needs to see the code in isolation to diagnose execution failures
 - `token_usage`: Input/output token counts (useful for diagnosing truncation)
 
 **Example entry:**
 ```python
 {
     "operation": "llm_call",
-    "input_summary": "Asked for Python code to visualize correlation matrix for 8 numeric columns",
-    "output_summary": "Returned JSON with code field (47 lines) and explanation field",
+    "input_actual": "show me revenue trends over time",
+    "output_actual": '{"code": "import matplotlib.pyplot as plt\\ndf[\'revenue\'].plot()\\nplt.title(\'Revenue Trends\')\\nplt.show()", "explanation": "Here\'s a line chart showing revenue trends..."}',
     "success": True,
     "metadata": {
         "model": "claude-sonnet-4-20250514",
         "purpose": "analysis_query",
         "response_format": "json",
         "parse_success": True,
+        "parsed_code": "import matplotlib.pyplot as plt\ndf['revenue'].plot()\nplt.title('Revenue Trends')\nplt.show()",
         "token_usage": {"input": 1820, "output": 645},
     },
 }
 ```
 
+With this entry, the troubleshooter can write: "To reproduce: upload a dataset with columns ['date', 'sales', 'region', 'units'], then ask 'show me revenue trends over time'. The LLM generates code referencing `df['revenue']` which doesn't exist."
+
 ### 2. Sandboxed code execution
 
 Every `exec()` call in `executor.py` gets a context entry. LLM-generated code is the second most common failure point.
 
+**Core fields:**
+- `input_actual`: The full code that was executed (capped at 5,000 chars). The troubleshooter needs this to diagnose why execution failed — "first and last line" isn't enough to spot a bad column reference on line 3
+- `output_actual`: The stdout output (capped at 5,000 chars), or the error traceback if execution failed
+
 **Metadata to capture:**
-- `code_summary`: First and last line of the code, plus line count (NOT the full code — it's in the session's code history already)
 - `namespace_keys`: What variables were available in the execution namespace
 - `had_figures`: Whether matplotlib figures were captured
-- `stdout_length`: Length of captured stdout
 - `execution_time_ms`: How long execution took (useful for diagnosing timeouts)
+- `dataframe_changed`: Whether any DataFrame's shape or columns changed during execution
 
 ### 3. File upload and parsing
 
 Dataset uploads involve format detection, encoding guessing, and pandas parsing — all of which can fail in surprising ways.
 
+**Core fields:**
+- `input_actual`: The filename
+- `output_actual`: A structured summary of what was parsed — shape, column names, dtypes. Not the data rows themselves
+
 **Metadata to capture:**
-- `filename`: Original filename
 - `file_size_bytes`: Size of the uploaded file
 - `detected_format`: csv, xlsx, etc.
 - `resulting_shape`: (rows, cols) of the parsed DataFrame
-- `column_types_summary`: e.g. "5 numeric, 3 object, 1 datetime"
+- `columns_with_dtypes`: dict of column name → dtype string (e.g. `{"date": "object", "sales": "float64"}`)
+- `missing_values`: dict of column name → null count (only columns with nulls)
 
 ### 4. Data cleaning operations
 
 Cleaning steps transform the working dataframe. Capture what changed so the troubleshooter can trace data-related errors back to a cleaning step.
+
+**Core fields:**
+- `input_actual`: The cleaning action and target (e.g. "drop_duplicates on dataset 'sales'")
+- `output_actual`: A before/after summary: shape change, column change if any
 
 **Metadata to capture:**
 - `cleaning_type`: e.g. "drop_column", "fill_missing", "convert_type"
 - `target_columns`: Which columns were affected
 - `rows_before`: Row count before
 - `rows_after`: Row count after
-- `shape_changed`: Whether the dataframe shape changed
+- `columns_before`: Column list before (captures column drops/adds)
+- `columns_after`: Column list after
+- `dtypes_after`: Current dtypes after the operation (captures type conversions)
 
 ---
 
@@ -171,23 +211,42 @@ It does NOT activate for:
 
 ### What it receives
 
-The troubleshooter gets a **diagnosis request** containing:
-
-1. **The error** — Exception type, message, and the immediate traceback (just the relevant frames, not the full stack)
-2. **The context buffer** — The last N entries from the session's context buffer
-3. **The current operation** — What the system was trying to do when the error occurred
-4. **Session summary** — Dataset shape, column names, conversation turn count (NOT the full conversation history or dataframe contents)
+The troubleshooter gets a **diagnosis request** containing everything it needs to diagnose the bug AND write reproduction steps for a PR. The guiding question is: "Could a developer reproduce this bug from the information in this request alone?"
 
 ```python
 @dataclass
 class DiagnosisRequest:
-    error_type: str
-    error_message: str
+    # ── The error itself ──────────────────────────────────────────────
+    error_type: str                 # e.g. "KeyError", "AttributeError", "JSONDecodeError"
+    error_message: str              # The exception message
     traceback_summary: str          # Last 3-5 frames, not full trace
-    context_buffer: list[dict]      # Recent ContextEntry dicts
-    current_operation: str          # What was being attempted
-    session_summary: dict           # Shape, columns, turn count
+    current_operation: str          # What was being attempted when the error occurred
+
+    # ── Recent operation history ──────────────────────────────────────
+    context_buffer: list[dict]      # The last N ContextEntry dicts (with actual inputs/outputs)
+
+    # ── Session state at time of error ────────────────────────────────
+    # These come from the session object, not the buffer. The buffer shows
+    # what happened over time; session state shows what the world looks like
+    # RIGHT NOW when the error fired.
+    conversation_history: list[dict] # Full conversation so far — the troubleshooter needs
+                                     # this to understand what sequence of interactions led
+                                     # here and to write "ask these questions in order" in
+                                     # reproduction steps
+    current_dataframe_metadata: dict # Current shape, columns, dtypes, missing value counts
+                                     # for ALL dataframes in the session. NOT the data rows —
+                                     # just the structural metadata. This reflects the current
+                                     # state after any cleaning operations, not the upload-time
+                                     # snapshot.
+    ml_state: dict | None           # Current ML workflow state (stage, target, features, etc.)
+                                     # if the error occurred during the ML flow
 ```
+
+**Why include conversation history AND the context buffer?** They serve different purposes:
+- The **context buffer** shows system-level operations: what the LLM returned, what code was executed, what parsing succeeded or failed. It's the technical trace.
+- The **conversation history** shows the user-level interaction: what the user asked, what the assistant said back. It's the reproduction script — "step 1: ask X, step 2: ask Y, step 3: the error occurs."
+
+Together, they give the troubleshooter both the "what went wrong technically" and the "how to get there from a fresh session."
 
 ### Error classification
 
@@ -344,14 +403,16 @@ The same `DiagnosisRequest` structure, but populated differently:
 DiagnosisRequest(
     error_type="user_reported",
     error_message="That chart is wrong — sales should be going up, not down",
-    traceback_summary="",               # No traceback — no exception was thrown
-    context_buffer=session.context_buffer,  # Same rolling buffer
+    traceback_summary="",                          # No traceback — no exception was thrown
     current_operation="user_bug_report",
-    session_summary={...},              # Same session summary as system-detected path
+    context_buffer=session.context_buffer,          # Same rolling buffer with actual inputs/outputs
+    conversation_history=session.conversation_history,  # Full conversation leading up to the report
+    current_dataframe_metadata=build_dataset_metadata(session.dataframes),
+    ml_state=None,
 )
 ```
 
-The troubleshooter uses the context buffer to reconstruct what happened: what data was loaded, what the user asked, what the LLM generated, what code was executed, and what output was produced. It then compares the user's complaint against that chain to diagnose the issue.
+The troubleshooter uses the context buffer to reconstruct the technical chain (what code was generated, what it produced), the conversation history to understand the user's intent (what they asked for vs. what they got), and the current dataframe metadata to check whether the output was actually wrong (maybe the data really does show a decline and the user's expectation was incorrect — that's a `user_caused` classification, not a code bug).
 
 ### What the user sees
 
