@@ -61,6 +61,18 @@ The trigger is the observability strategy document itself — this is the implem
 
 ## 3. Desired behavior
 
+### Preparatory refactor: extract routes from `main.py`
+- `main.py` (~1,077 lines) currently contains all 9 route handlers, SSE streaming logic, retry orchestration, ML workflow helpers, pure utilities, key validation, and app setup. Adding instrumentation, a top-level exception handler, and a new endpoint to this file would push it past 1,200 lines and make the highest-risk part of the change (the exception handler) harder to audit.
+- Refactor `main.py` into focused route modules using FastAPI `APIRouter`:
+  - `routes/upload.py` — `/api/upload`, `parse_dataframes_from_bytes`, `build_dataset_metadata`
+  - `routes/chat.py` — `/api/chat`, `_attempt_chat_with_retries`, `_single_chat_attempt`, `_sse_event`, `_append_to_code_history`
+  - `routes/clean.py` — `/api/clean`, `/api/clean/reset`, `_resolve_dataset_name`
+  - `routes/ml.py` — `/api/ml-step`, `_build_ml_prompt`, `_update_ml_session_state`, `_reset_ml_state_from_stage`
+  - `routes/export.py` — `/api/export/{session_id}`
+  - `routes/keys.py` — `/api/validate-key`, `/api/models`, `/api/health`, key validation helpers
+- `main.py` becomes ~100 lines: app creation, CORS, router includes, session store instantiation, and the top-level exception handler.
+- This is a **Phase B2 preparatory refactor** per the brownfield execution sequence. It has its own characterization tests confirming every existing endpoint behaves identically after the move. No behavior changes — pure structural reorganization.
+
 ### Context buffer
 - `Session` gains a `context_buffer: list[ContextEntry]` field, initialized empty, capped at 20 entries (FIFO).
 - `ContextEntry` is a dataclass with: timestamp, operation, input_actual, output_actual, success, error, metadata.

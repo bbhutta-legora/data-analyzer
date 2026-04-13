@@ -6,12 +6,28 @@ Branch-scoped artifact — remove upon merge to main.
 
 ## 1. Affected files and functions
 
-### Backend — Modified
+### Backend — Refactored (Phase B2 preparatory refactor)
+
+| File | What happens |
+|------|-------------|
+| `backend/main.py` | Reduced to ~100 lines: app creation, CORS, router includes, session store, top-level exception handler |
+| `backend/routes/upload.py` | Extracted from main.py: `/api/upload`, `parse_dataframes_from_bytes`, `build_dataset_metadata` |
+| `backend/routes/chat.py` | Extracted from main.py: `/api/chat`, `_attempt_chat_with_retries`, `_single_chat_attempt`, `_sse_event`, `_append_to_code_history` |
+| `backend/routes/clean.py` | Extracted from main.py: `/api/clean`, `/api/clean/reset`, `_resolve_dataset_name` |
+| `backend/routes/ml.py` | Extracted from main.py: `/api/ml-step`, `_build_ml_prompt`, `_update_ml_session_state`, `_reset_ml_state_from_stage` |
+| `backend/routes/export.py` | Extracted from main.py: `/api/export/{session_id}` |
+| `backend/routes/keys.py` | Extracted from main.py: `/api/validate-key`, `/api/models`, `/api/health`, key validation helpers |
+
+### Backend — Modified (after refactor)
 
 | File | Functions/Areas affected | What changes |
 |------|------------------------|-------------|
 | `backend/session.py` | `Session` dataclass | Add `context_buffer: list` field |
-| `backend/main.py` | `/api/upload`, `/api/chat`, `/api/clean`, `/api/ml-step`, app-level error handling | Add instrumentation at boundary call sites; add top-level exception handler; add `POST /api/bug-report` endpoint |
+| `backend/main.py` | App-level error handling | Add top-level exception handler |
+| `backend/routes/upload.py` | `/api/upload` | Add file-parse instrumentation |
+| `backend/routes/chat.py` | `/api/chat` | Add LLM call + code execution instrumentation |
+| `backend/routes/clean.py` | `/api/clean` | Add cleaning instrumentation |
+| `backend/routes/ml.py` | `/api/ml-step` | Add LLM call + code execution instrumentation |
 | `backend/requirements.txt` | — | Add `PyGithub` dependency |
 
 ### Backend — New
@@ -19,6 +35,7 @@ Branch-scoped artifact — remove upon merge to main.
 | File | Purpose |
 |------|---------|
 | `backend/troubleshooter.py` | `ContextEntry` dataclass, `DiagnosisRequest`/`Diagnosis` dataclasses, `diagnose()`, `invoke_fix_agent()`, `create_fix_pr()`, `handle_systemic_error()`, managed agent setup |
+| `backend/routes/bug_report.py` | `POST /api/bug-report` endpoint |
 
 ### Frontend — Modified
 
@@ -36,9 +53,9 @@ Branch-scoped artifact — remove upon merge to main.
 
 | File | Why |
 |------|-----|
-| `backend/llm.py` | Instrumentation happens at call sites in `main.py`, not inside `llm.py`. `call_llm_chat()` is called by `troubleshooter.py` but its interface is unchanged. |
-| `backend/executor.py` | Instrumentation happens at call sites in `main.py`. `execute_code()` interface unchanged. |
-| `backend/clean.py` | Pure functions. Instrumentation happens in `/api/clean` endpoint. |
+| `backend/llm.py` | Instrumentation happens at call sites in route modules, not inside `llm.py`. `call_llm_chat()` is called by `troubleshooter.py` but its interface is unchanged. |
+| `backend/executor.py` | Instrumentation happens at call sites in route modules. `execute_code()` interface unchanged. |
+| `backend/clean.py` | Pure functions. Instrumentation happens in `routes/clean.py`. |
 | `backend/exporter.py` | Not a system boundary. No instrumentation needed. |
 | `frontend/src/components/ChatPanel.tsx` | Bug widget is a sibling component, not a modification to ChatPanel. |
 
