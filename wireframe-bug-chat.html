@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bug Report Chat — Wireframe Concepts</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f3f4f6; color: #374151; }
+
+  /* Navigation */
+  .nav { display: flex; justify-content: center; gap: 12px; padding: 20px; background: #fff; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 100; }
+  .nav-btn { padding: 10px 24px; border-radius: 8px; border: 2px solid #e5e7eb; background: #fff; color: #6b7280; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .nav-btn:hover { border-color: #1a73e8; color: #1a73e8; }
+  .nav-btn.active { border-color: #1a73e8; background: #e8f0fe; color: #1a73e8; }
+
+  /* Concept container */
+  .concept { display: none; padding: 24px; }
+  .concept.active { display: block; }
+  .concept-header { text-align: center; margin-bottom: 20px; }
+  .concept-header h2 { font-size: 20px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+  .concept-header p { font-size: 14px; color: #6b7280; max-width: 600px; margin: 0 auto; line-height: 1.6; }
+
+  /* Shared wireframe chrome */
+  .wireframe { max-width: 1100px; margin: 0 auto; border: 1px solid #d1d5db; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+  /* Header bar (shared) */
+  .app-header { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 8px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; height: 40px; }
+  .header-btn { padding: 4px 12px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; font-size: 12px; color: #374151; cursor: default; }
+  .header-btn.purple { background: #6d28d9; color: #fff; border-color: #6d28d9; }
+  .header-btn.blue { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+
+  /* Chat message area */
+  .chat-area { flex: 1; overflow-y: auto; padding: 24px; }
+  .chat-inner { max-width: 640px; margin: 0 auto; }
+  .msg { margin-bottom: 16px; }
+  .msg-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin-bottom: 4px; }
+  .msg-bubble { padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; }
+  .msg-user .msg-bubble { background: #e8f0fe; margin-left: 20%; }
+  .msg-user .msg-label { text-align: right; padding-right: 4px; }
+  .msg-assistant .msg-bubble { background: #fff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .msg-assistant .msg-bubble .chart-placeholder { background: #f0f4f9; border: 1px dashed #d1d5db; border-radius: 8px; height: 120px; display: flex; align-items: center; justify-content: center; color: #6b7280; font-size: 13px; margin-top: 8px; }
+
+  /* Input bar */
+  .input-bar { display: flex; gap: 8px; padding: 12px 24px; border-top: 1px solid #e5e7eb; background: #fff; }
+  .input-bar input { flex: 1; padding: 10px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; color: #374151; outline: none; }
+  .input-bar input::placeholder { color: #9ca3af; }
+  .input-bar .send-btn { padding: 10px 18px; background: #1a73e8; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: default; }
+  .input-bar .send-btn.disabled { background: #d1d5db; }
+
+  /* ─── Concept A: Side Panel ─── */
+  .layout-sidepanel { display: flex; height: 560px; }
+  .layout-sidepanel .main-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; transition: all 0.25s; }
+  .layout-sidepanel .bug-panel { width: 360px; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; background: #fefefe; transition: all 0.25s; }
+  .layout-sidepanel .bug-panel.collapsed { width: 0; overflow: hidden; border-left: none; }
+  .bug-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #fef2f2; border-bottom: 1px solid #fecaca; }
+  .bug-panel-header h3 { font-size: 13px; font-weight: 600; color: #991b1b; }
+  .bug-panel-close { background: none; border: none; font-size: 18px; color: #991b1b; cursor: pointer; padding: 0 4px; }
+  .bug-panel .chat-area { background: #fffbfb; }
+  .bug-panel .msg-assistant .msg-bubble { background: #fff; border-color: #fecaca; }
+  .bug-panel .input-bar input::placeholder { color: #b0b0b0; }
+  .report-issue-btn { padding: 4px 12px; border-radius: 6px; border: 1px solid #fecaca; background: #fef2f2; font-size: 12px; color: #991b1b; cursor: pointer; font-weight: 500; }
+  .report-issue-btn:hover { background: #fecaca; }
+
+  /* ─── Concept B: Tabs ─── */
+  .layout-tabs { display: flex; flex-direction: column; height: 560px; }
+  .tab-bar { display: flex; gap: 0; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+  .tab-btn { padding: 10px 20px; font-size: 13px; font-weight: 600; color: #6b7280; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
+  .tab-btn:hover { color: #374151; background: #f0f4f9; }
+  .tab-btn.active-analysis { color: #1a73e8; border-bottom-color: #1a73e8; }
+  .tab-btn.active-bug { color: #991b1b; border-bottom-color: #991b1b; }
+  .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: #991b1b; display: none; }
+  .tab-content { flex: 1; display: flex; flex-direction: column; }
+  .tab-pane { display: none; flex: 1; flex-direction: column; }
+  .tab-pane.active { display: flex; }
+
+  /* ─── Concept C: Modal/Drawer ─── */
+  .layout-modal { position: relative; height: 560px; display: flex; flex-direction: column; }
+  .drawer-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.15); z-index: 10; display: none; }
+  .drawer-overlay.visible { display: block; }
+  .drawer { position: absolute; right: 0; top: 0; bottom: 0; width: 400px; background: #fff; z-index: 20; box-shadow: -4px 0 20px rgba(0,0,0,0.12); display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
+  .drawer.open { transform: translateX(0); }
+  .drawer-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: #fef2f2; border-bottom: 1px solid #fecaca; }
+  .drawer-header h3 { font-size: 14px; font-weight: 600; color: #991b1b; }
+  .drawer-close { background: none; border: none; font-size: 20px; color: #991b1b; cursor: pointer; padding: 0 4px; }
+  .drawer .chat-area { background: #fffbfb; }
+  .drawer .msg-assistant .msg-bubble { border-color: #fecaca; }
+  .report-fab { position: absolute; bottom: 76px; right: 24px; z-index: 5; padding: 10px 16px; border-radius: 24px; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 6px; }
+  .report-fab:hover { background: #fecaca; }
+  .report-fab-icon { font-size: 16px; }
+
+  /* Pros/Cons cards */
+  .tradeoffs { max-width: 700px; margin: 20px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .tradeoff-card { padding: 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+  .tradeoff-card.pro { background: #ecfdf5; border: 1px solid #a7f3d0; }
+  .tradeoff-card.con { background: #fef2f2; border: 1px solid #fecaca; }
+  .tradeoff-card h4 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .tradeoff-card.pro h4 { color: #065f46; }
+  .tradeoff-card.con h4 { color: #991b1b; }
+
+  /* Annotation callouts */
+  .annotation { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #92400e; line-height: 1.5; margin: 12px auto 0; max-width: 700px; }
+  .annotation strong { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- Top nav -->
+<nav class="nav">
+  <button class="nav-btn active" onclick="showConcept('a')">A: Side Panel</button>
+  <button class="nav-btn" onclick="showConcept('b')">B: Tab / Toggle</button>
+  <button class="nav-btn" onclick="showConcept('c')">C: Modal / Drawer</button>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- CONCEPT A: Side Panel                                             -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div id="concept-a" class="concept active">
+  <div class="concept-header">
+    <h2>Concept A: Side Panel</h2>
+    <p>A collapsible panel slides open on the right. Both chats are visible simultaneously. The main analysis chat narrows to make room.</p>
+  </div>
+
+  <div class="wireframe">
+    <div class="app-header">
+      <button class="report-issue-btn" onclick="toggleSidePanel()">Report Issue</button>
+      <button class="header-btn">Reset to original</button>
+      <button class="header-btn purple">Build a Model</button>
+      <button class="header-btn blue">Export Notebook</button>
+    </div>
+    <div class="layout-sidepanel">
+      <!-- Main chat -->
+      <div class="main-chat">
+        <div class="chat-area" style="flex:1; overflow-y:auto;">
+          <div class="chat-inner">
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                I've analyzed your dataset <strong>sales_data.csv</strong> with 4 columns and 1,200 rows. Here's what I found...
+                <div class="chart-placeholder">[ Dataset summary cards ]</div>
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">Show me revenue trends over time</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                Here's a line chart showing sales trends over time:
+                <div class="chart-placeholder">[ Line chart: Sales over Time ]</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <input type="text" placeholder="Ask a question about your data...">
+          <button class="send-btn">Send</button>
+        </div>
+      </div>
+
+      <!-- Bug report panel -->
+      <div class="bug-panel" id="side-panel">
+        <div class="bug-panel-header">
+          <h3>Report an Issue</h3>
+          <button class="bug-panel-close" onclick="toggleSidePanel()">&times;</button>
+        </div>
+        <div class="chat-area" style="flex:1; overflow-y:auto;">
+          <div style="max-width:100%; padding: 0 4px;">
+            <div class="msg msg-assistant">
+              <div class="msg-label">System</div>
+              <div class="msg-bubble">
+                Describe what looks wrong. I'll note the issue and our team will look into it.
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">That chart is wrong — sales should be going up, not down</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">System</div>
+              <div class="msg-bubble">
+                Thanks for flagging that. Were you expecting sales to increase over the full time range, or just in a specific period?
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <input type="text" placeholder="Describe what's wrong..." style="font-size:13px;">
+          <button class="send-btn" style="padding: 10px 14px;">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <strong>Interaction:</strong> Click "Report Issue" in the header to toggle the side panel open/closed. The main chat narrows when the panel is open. Both conversations are active simultaneously.
+  </div>
+
+  <div class="tradeoffs">
+    <div class="tradeoff-card pro">
+      <h4>Pros</h4>
+      Both chats visible at once — user can reference the analysis output while reporting. No context switching. Feels like a natural "aside."
+    </div>
+    <div class="tradeoff-card con">
+      <h4>Cons</h4>
+      Main chat narrows, which may cause layout reflow on charts/tables. More complex responsive behavior. Two active input areas could confuse focus.
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- CONCEPT B: Tab / Toggle                                           -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div id="concept-b" class="concept">
+  <div class="concept-header">
+    <h2>Concept B: Tab / Toggle</h2>
+    <p>A tab bar below the header switches between "Analysis" and "Report Issue" views. Only one is visible at a time. Each has its own full-width chat area.</p>
+  </div>
+
+  <div class="wireframe">
+    <div class="app-header">
+      <button class="header-btn">Reset to original</button>
+      <button class="header-btn purple">Build a Model</button>
+      <button class="header-btn blue">Export Notebook</button>
+    </div>
+    <div class="layout-tabs">
+      <div class="tab-bar">
+        <button class="tab-btn active-analysis" id="tab-analysis" onclick="switchTab('analysis')">
+          Analysis
+        </button>
+        <button class="tab-btn" id="tab-bug" onclick="switchTab('bug')">
+          Report Issue
+          <span class="tab-dot" id="tab-dot"></span>
+        </button>
+      </div>
+
+      <!-- Analysis pane -->
+      <div class="tab-pane active" id="pane-analysis">
+        <div class="chat-area" style="flex:1; overflow-y:auto;">
+          <div class="chat-inner">
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                I've analyzed your dataset <strong>sales_data.csv</strong> with 4 columns and 1,200 rows. Here's what I found...
+                <div class="chart-placeholder">[ Dataset summary cards ]</div>
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">Show me revenue trends over time</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                Here's a line chart showing sales trends over time:
+                <div class="chart-placeholder">[ Line chart: Sales over Time ]</div>
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">Break it down by region</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                Here's the regional breakdown:
+                <div class="chart-placeholder">[ Grouped bar chart: Sales by Region ]</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <input type="text" placeholder="Ask a question about your data...">
+          <button class="send-btn">Send</button>
+        </div>
+      </div>
+
+      <!-- Bug report pane -->
+      <div class="tab-pane" id="pane-bug" style="background: #fffbfb;">
+        <div class="chat-area" style="flex:1; overflow-y:auto;">
+          <div class="chat-inner">
+            <div class="msg msg-assistant">
+              <div class="msg-label">System</div>
+              <div class="msg-bubble" style="border-color: #fecaca;">
+                Describe what looks wrong with the analysis or output. I'll note the issue and our team will look into it.
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">That chart is wrong — sales should be going up, not down</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">System</div>
+              <div class="msg-bubble" style="border-color: #fecaca;">
+                Thanks for flagging that. We've noted the issue and our team will look into it.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <input type="text" placeholder="Describe what's wrong...">
+          <button class="send-btn" style="background: #991b1b;">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <strong>Interaction:</strong> Click the tabs to switch views. The red dot on "Report Issue" (visible when you switch back to Analysis after reporting) indicates an active or acknowledged report. Each tab has its own independent chat history and input.
+  </div>
+
+  <div class="tradeoffs">
+    <div class="tradeoff-card pro">
+      <h4>Pros</h4>
+      Cleanest separation — main chat component untouched structurally. Full-width bug chat. Equally discoverable. Simple invariant: "Analysis tab is identical to current chat."
+    </div>
+    <div class="tradeoff-card con">
+      <h4>Cons</h4>
+      User can't see the analysis output while reporting. Must remember what was wrong and switch tabs. Adds a tab bar that takes vertical space from the chat.
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- CONCEPT C: Modal / Drawer                                         -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div id="concept-c" class="concept">
+  <div class="concept-header">
+    <h2>Concept C: Modal / Drawer</h2>
+    <p>A floating button opens a slide-out drawer from the right. The main chat is visible (dimmed) underneath. The drawer overlays rather than displacing content.</p>
+  </div>
+
+  <div class="wireframe">
+    <div class="app-header">
+      <button class="header-btn">Reset to original</button>
+      <button class="header-btn purple">Build a Model</button>
+      <button class="header-btn blue">Export Notebook</button>
+    </div>
+    <div class="layout-modal">
+      <!-- Main chat (always present) -->
+      <div style="flex:1; display:flex; flex-direction:column;">
+        <div class="chat-area" style="flex:1; overflow-y:auto;">
+          <div class="chat-inner">
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                I've analyzed your dataset <strong>sales_data.csv</strong> with 4 columns and 1,200 rows. Here's what I found...
+                <div class="chart-placeholder">[ Dataset summary cards ]</div>
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">Show me revenue trends over time</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                Here's a line chart showing sales trends over time:
+                <div class="chart-placeholder">[ Line chart: Sales over Time ]</div>
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">Break it down by region</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">Assistant</div>
+              <div class="msg-bubble">
+                Here's the regional breakdown:
+                <div class="chart-placeholder">[ Grouped bar chart: Sales by Region ]</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <input type="text" placeholder="Ask a question about your data...">
+          <button class="send-btn">Send</button>
+        </div>
+      </div>
+
+      <!-- FAB button -->
+      <button class="report-fab" id="fab-btn" onclick="toggleDrawer()">
+        <span class="report-fab-icon">&#9888;</span> Report Issue
+      </button>
+
+      <!-- Overlay -->
+      <div class="drawer-overlay" id="drawer-overlay" onclick="toggleDrawer()"></div>
+
+      <!-- Drawer -->
+      <div class="drawer" id="drawer">
+        <div class="drawer-header">
+          <h3>Report an Issue</h3>
+          <button class="drawer-close" onclick="toggleDrawer()">&times;</button>
+        </div>
+        <div class="chat-area" style="flex:1; overflow-y:auto;">
+          <div style="max-width:100%; padding: 0 4px;">
+            <div class="msg msg-assistant">
+              <div class="msg-label">System</div>
+              <div class="msg-bubble" style="border-color: #fecaca;">
+                Describe what looks wrong. I'll note the issue and our team will look into it.
+              </div>
+            </div>
+            <div class="msg msg-user">
+              <div class="msg-label">You</div>
+              <div class="msg-bubble">That chart is wrong — sales should be going up, not down</div>
+            </div>
+            <div class="msg msg-assistant">
+              <div class="msg-label">System</div>
+              <div class="msg-bubble" style="border-color: #fecaca;">
+                Thanks for flagging that. Were you expecting sales to increase over the full time range, or just in a specific period?
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <input type="text" placeholder="Describe what's wrong..." style="font-size: 13px;">
+          <button class="send-btn" style="background: #991b1b; padding: 10px 14px;">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <strong>Interaction:</strong> Click the "Report Issue" floating button (bottom-right) to open/close the drawer. The main chat is dimmed but still visible behind the overlay. Click the overlay or &times; to close.
+  </div>
+
+  <div class="tradeoffs">
+    <div class="tradeoff-card pro">
+      <h4>Pros</h4>
+      Lowest risk to existing UI — main chat DOM is completely untouched. Drawer is a separate component tree. User can still see the analysis (dimmed) for reference while reporting.
+    </div>
+    <div class="tradeoff-card con">
+      <h4>Cons</h4>
+      Feels secondary/hidden — less discoverable than tabs. The floating button could overlap with content. Modal pattern implies a transient action, but bug reports may need revisiting.
+    </div>
+  </div>
+</div>
+
+<script>
+  function showConcept(id) {
+    document.querySelectorAll('.concept').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('concept-' + id).classList.add('active');
+    document.querySelectorAll('.nav-btn')[{a:0,b:1,c:2}[id]].classList.add('active');
+  }
+
+  // Concept A: toggle side panel
+  function toggleSidePanel() {
+    document.getElementById('side-panel').classList.toggle('collapsed');
+  }
+
+  // Concept B: switch tabs
+  function switchTab(which) {
+    const isAnalysis = which === 'analysis';
+    document.getElementById('tab-analysis').className = 'tab-btn' + (isAnalysis ? ' active-analysis' : '');
+    document.getElementById('tab-bug').className = 'tab-btn' + (isAnalysis ? '' : ' active-bug');
+    document.getElementById('pane-analysis').className = 'tab-pane' + (isAnalysis ? ' active' : '');
+    document.getElementById('pane-bug').className = 'tab-pane' + (isAnalysis ? '' : ' active');
+    // Show dot when switching away from bug tab (simulates "has activity" indicator)
+    if (isAnalysis) { document.getElementById('tab-dot').style.display = 'inline-block'; }
+    else { document.getElementById('tab-dot').style.display = 'none'; }
+  }
+
+  // Concept C: toggle drawer
+  function toggleDrawer() {
+    const drawer = document.getElementById('drawer');
+    const overlay = document.getElementById('drawer-overlay');
+    const fab = document.getElementById('fab-btn');
+    const isOpen = drawer.classList.contains('open');
+    drawer.classList.toggle('open');
+    overlay.classList.toggle('visible');
+    fab.style.display = isOpen ? 'flex' : 'none';
+  }
+</script>
+
+</body>
+</html>
