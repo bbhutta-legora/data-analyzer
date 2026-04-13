@@ -206,18 +206,21 @@ Use this sequence when the change modifies existing code rather than creating ne
 
 ### Characterization tests
 
-Characterization tests are distinct from feature tests:
+Characterization tests fill in gaps in test coverage for desired behaviors within the blast radius of your change. That's the whole concept.
+
+Existing tests already protect some behaviors. Characterization tests cover the rest — the desired behaviors that nobody wrote tests for yet, but that your change could break. The change spec tells you exactly which behaviors these are: Section 5 (invariants to preserve) identifies them, and reconnaissance tells you which of those lack tests.
+
+**Do not write characterization tests for behaviors you intend to change.** Those get feature tests in Phase A/B. Characterization tests are only for behaviors that should survive your change unchanged.
 
 | | Feature tests | Characterization tests |
 |---|---|---|
-| **Purpose** | Verify new behavior works | Verify existing behavior isn't broken |
+| **Purpose** | Verify new/changed behavior works | Fill test gaps for existing desired behaviors in the blast radius |
 | **Written when** | Before implementation (TDD) | Before any changes to existing code |
 | **Expected initial result** | Fail (behavior doesn't exist yet) | Pass (behavior already exists) |
 | **After implementation** | Pass | Still pass |
 | **Kept permanently?** | Yes | Yes — they become regression tests for future changes |
 
 When writing characterization tests:
-- Focus on the invariants from the change spec — the behaviors that must NOT change
 - Test at the interface level (function inputs/outputs), not implementation details
 - Include edge cases that the reconnaissance flagged as implicit contracts
 - These tests stay in the codebase permanently — they're not scaffolding. They protect future maintainability.
