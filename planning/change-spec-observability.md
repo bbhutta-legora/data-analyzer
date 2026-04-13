@@ -2,211 +2,201 @@
 
 Branch-scoped artifact — remove upon merge to main.
 
----
-
-## 1. What's changing and why
-
-The application currently has no structured runtime diagnostics. When an LLM call produces wrong output, generated code crashes, or a user sees a bad chart, the only trace is scattered `logger.info()` calls in `main.py` and `llm.py`. Developers have no way to reconstruct what happened, and users have no way to report issues other than rephrasing their question.
-
-This change implements the full observability strategy defined in `harness/OBSERVABILITY-STRATEGY.md`: a per-session context buffer that captures operations at system boundaries, a two-path bug-catching pipeline (system-detected exceptions + user-reported issues), a troubleshooter agent that diagnoses errors and generates fixes, and automated PR creation for systemic bugs.
-
-The trigger is the observability strategy document itself — this is the implementation of a planned architectural feature.
+Organization: by area, not by abstract category. Each section is self-contained — read it, understand it, move on. Inspired by clean code principles (guard clause pattern applied to documentation: handle each concern fully so the reader can proceed without carrying it forward).
 
 ---
 
-## 2. Current behavior
+## Overview
 
-### Session state (`backend/session.py`)
-- `Session` dataclass holds all mutable state: DataFrames, conversation history, code history, exec namespace, ML workflow state.
-- No context buffer field exists. No operation history is tracked.
-- `SessionStore` provides create/get/delete. No hook points for buffer management.
+The application has no structured runtime diagnostics. When an LLM call produces wrong output, generated code crashes, or a user sees a bad chart, the only trace is scattered `logger.info()` calls. Developers can't reconstruct what happened. Users can't report issues.
 
-### Error handling (`backend/main.py`)
-- Individual endpoints catch expected errors (missing session → 404, invalid input → 400, parse failure → 400).
-- **No top-level exception handler.** Unhandled exceptions produce FastAPI's default 500 with a stack trace.
-- LLM errors in `/api/chat` are caught in `_attempt_chat_with_retries` (line ~543) and streamed back as SSE error events. After `MAX_CHAT_RETRIES` (1), the error is logged and sent to the user as-is.
-
-### LLM calls (`backend/llm.py`)
-- `call_llm_chat()` (line ~466) and `call_llm()` (line ~415) call Anthropic/OpenAI APIs.
-- Response parsing in `parse_chat_response()` (line ~290) extracts JSON with code/explanation.
-- Logging: `logger.warning` on parse failures, `logger.info` on call start/response receipt.
-- No structured capture of inputs, outputs, or parsed results.
-
-### Code execution (`backend/executor.py`)
-- `execute_code()` (line ~197) runs LLM-generated code in a subprocess sandbox.
-- Returns `{stdout, figures, error, dataframe_changed, new_dfs_pickle}`.
-- No logging or context capture of what was executed or what it produced.
-
-### File parsing (`backend/main.py`, lines ~89-114)
-- `parse_dataframes_from_bytes()` parses CSV/Excel into DataFrames.
-- Called by `/api/upload`. Failures are caught and return 400.
-- No capture of parse results (shape, columns, dtypes).
-
-### Data cleaning (`backend/clean.py`, `backend/main.py` lines ~678-750)
-- `apply_cleaning_action()` dispatches to pure functions (drop_duplicates, fill_median, drop_missing_rows).
-- `logger.info()` logs the action at the endpoint level.
-- No capture of before/after state.
-
-### User bug reporting
-- Does not exist. No endpoint, no UI, no mechanism.
-
-### Frontend (`frontend/src/`)
-- Single-screen chat interface (ChatPanel) with header bar, scrollable messages, and input bar.
-- No bug-report UI, no floating buttons, no secondary chat context.
-
-### GitHub integration
-- None. No GitHub API client, no tokens, no PR creation capability.
+This change implements the observability strategy from `harness/OBSERVABILITY-STRATEGY.md`: a per-session context buffer, instrumentation at system boundaries, a two-path bug-catching pipeline (system-detected + user-reported), a troubleshooter agent that diagnoses and fixes systemic bugs, and automated PR creation.
 
 ---
 
-## 3. Desired behavior
+## Area 1: Context Buffer
 
-### Context buffer
-- `Session` gains a `context_buffer: list[ContextEntry]` field, initialized empty, capped at 20 entries (FIFO).
-- `ContextEntry` is a dataclass with: timestamp, operation, input_actual, output_actual, success, error, metadata.
-- Buffer is in-memory only — not persisted, discarded when session ends.
+**What exists today:** `Session` dataclass in `backend/session.py` holds all mutable state (DataFrames, conversation history, code history, exec namespace, ML state). No operation history is tracked. `SessionStore` provides create/get/delete with no hook points for buffer management.
 
-### Instrumentation at 4 system boundaries
-- **LLM calls**: Every `call_llm_chat()` / `call_llm()` invocation creates a context entry with the user's question, raw LLM response, model, purpose, parse success, parsed code, and token usage.
-- **Code execution**: Every `execute_code()` call creates a context entry with the full code, stdout/error output, namespace keys, figure count, execution time, and DataFrame change detection.
-- **File parsing**: Every `parse_dataframes_from_bytes()` call creates a context entry with filename, resulting shape, columns with dtypes, and missing value counts.
-- **Data cleaning**: Every `apply_cleaning_action()` call creates a context entry with the action, target columns, and before/after row counts, column lists, and dtypes.
+**What changes:**
+- `Session` gains a `context_buffer: list` field, initialized empty, capped at 20 entries (FIFO).
+- `ContextEntry` dataclass defined in `backend/troubleshooter.py` with fields: `timestamp`, `operation`, `input_actual`, `output_actual`, `success`, `error`, `metadata`.
+- Buffer append helper enforces the FIFO cap — oldest entry dropped when buffer exceeds 20.
+- Buffer is in-memory only. Not persisted. Discarded when session ends.
 
-### Bug-catching Path 1: System-detected errors
-- A top-level FastAPI exception handler catches **any unhandled exception from any endpoint** — regardless of whether the error originated at an instrumented boundary (LLM call, code execution) or in our own deterministic code (a wrong `.get()` call, an `AttributeError` from an unexpected data shape, an `IndexError` in a list comprehension). The boundary instruments feed evidence into the buffer; the top-level handler is the trigger that fires on any unhandled error.
-- It builds a `DiagnosisRequest` (error details + context buffer + conversation history + current DataFrame metadata + ML state) and calls `diagnose()`.
-- `diagnose()` lives in `troubleshooter.py` (not `llm.py` — it serves the observability pipeline, not the user's analysis session). It calls `call_llm_chat()` from `llm.py` for the actual API transport, but prompt construction, classification logic, and the `DiagnosisRequest`/`Diagnosis` dataclasses all belong to the troubleshooter module.
-- `diagnose()` classifies the error (transient / user_caused / systemic) and returns a `Diagnosis`.
-- For transient/user_caused: returns a friendly user-facing message. Done.
-- For systemic: returns the friendly message to the user immediately, then spawns a background task.
-- Background task invokes a **managed agent** (Anthropic's hosted agent infrastructure) via the Anthropic SDK (`client.beta.agents` / `client.beta.sessions`). The managed agent has built-in tools (bash, read, write, edit, glob, grep) and runs in an Anthropic-managed cloud environment. It clones the repo, explores the codebase, generates a fix following the brownfield harness guidelines, writes a regression test, runs the test suite, and commits + pushes to a fix branch. The troubleshooter then opens a PR from the agent's committed changes.
-- Each step degrades gracefully if secrets are missing (see Acceptance Criteria).
+**Acceptance criteria:**
+- When a session is created, `session.context_buffer` is an empty list.
+- When the buffer exceeds 20 entries, the oldest entry is dropped.
 
-### Bug-catching Path 2: User-reported bugs
-- New endpoint: `POST /api/bug-report` accepts `{session_id, message}`.
-- Builds a `DiagnosisRequest` with `error_type="user_reported"` and the user's description as `error_message`.
-- Feeds into the same troubleshooter pipeline as Path 1.
-- Returns a short acknowledgment + optional single clarifying question.
-
-### Frontend: Bug report widget
-- A circular floating action button (~40px) positioned bottom-right of the chat screen, above the input bar.
-- Clicking opens a compact chat widget (~340x380px) anchored to the bottom-right corner.
-- Widget has its own header ("Report an Issue" + close button), scrollable message area, and text input.
-- Messages are sent to `POST /api/bug-report` and responses displayed in the widget.
-- Main analysis chat remains fully interactive underneath — no overlay, no dimming, no layout shift.
-- Widget is a separate React component tree; it does not modify the existing ChatPanel.
-
-### New module: `backend/troubleshooter.py`
-- Owns the entire observability pipeline: diagnosis, fix-agent invocation, and PR creation.
-- Contains `diagnose()`, `invoke_fix_agent()`, `create_fix_pr()`, and `handle_systemic_error()`.
-- Contains all dataclasses: `ContextEntry`, `DiagnosisRequest`, `Diagnosis`.
-- Diagnosis prompt template lives as a constant at the top of this file (per coding principle: "Keep all LLM prompts in `llm.py` or as constants at the top of the file where they're used").
-- `diagnose()` calls `call_llm_chat()` from `llm.py` for the actual API call. This is a single LLM call for error classification — not agentic.
-- `invoke_fix_agent()` uses the **Anthropic managed agent API** (`client.beta.agents` / `client.beta.sessions`). It creates a session with a pre-configured managed agent, sends the diagnosis as a user message, and polls for completion. The managed agent runs in Anthropic's cloud with built-in tools (bash, read, write, edit, glob, grep) — no custom tool implementations needed. The agent clones the repo, explores, fixes, tests, and commits autonomously.
-- The managed agent is created once at application startup with a system prompt that includes the **brownfield coding guidelines from the harness**: invariant awareness, `harness/coding_principles.md` (explicit types, greppable names, verbose comments, error handling contracts), and `harness/TEST-STRATEGY.md` test patterns. This ensures generated PRs match codebase conventions.
-- `create_fix_pr()` uses PyGithub to open a PR from the branch the managed agent committed to.
-- `handle_systemic_error()` orchestrates the background pipeline: diagnose → invoke agent → open PR.
-
-### Managed agent setup (one-time, at app startup)
-- A managed agent is created via `client.beta.agents.create()` with the troubleshooter system prompt and the `agent_toolset` (bash, read, write, edit, glob, grep).
-- A cloud environment is created via `client.beta.environments.create()` with `pytest` pre-installed and unrestricted networking (needed to clone the repo and push commits).
-- Agent ID and environment ID are stored as module-level state in `troubleshooter.py`.
-- If `ANTHROPIC_API_KEY` (for managed agent access) is not set, agent setup is skipped and the pipeline degrades gracefully (diagnosis only, no fix generation).
-
-### New dependencies
-- `PyGithub` added to `requirements.txt` for PR creation.
-- No new dependency for the managed agent — uses the existing `anthropic` SDK (already a dependency) via `client.beta.agents` and `client.beta.sessions`.
-
-### New environment variables
-- `TROUBLESHOOTER_GITHUB_TOKEN` — repo access token for git push + PR creation. If missing, fix generation still runs but PR creation is skipped; diagnosis + agent output logged to console.
-- The managed agent uses the same `ANTHROPIC_API_KEY` already configured for the app's LLM calls. No separate troubleshooter key needed — the managed agent API is part of the Anthropic platform.
-- `TROUBLESHOOTER_REPO_URL` — the repo URL the managed agent clones into its environment. Required for fix generation; if missing, Phases 2-3 are skipped.
-
----
-
-## 4. Acceptance criteria
-
-1. **When** a session is created, **then** `session.context_buffer` is an empty list.
-2. **When** an LLM call completes (success or failure), **then** a `ContextEntry` with operation="llm_call" is appended to the session's buffer with all metadata fields per the strategy doc.
-3. **When** code is executed in the sandbox, **then** a `ContextEntry` with operation="code_execution" is appended with full code, stdout/error, namespace keys, figure count, execution time, and DataFrame change status.
-4. **When** a file is uploaded and parsed, **then** a `ContextEntry` with operation="file_parse" is appended with filename, resulting shape, columns with dtypes, and missing values.
-5. **When** a cleaning action is applied, **then** a `ContextEntry` with operation="data_clean" is appended with action, target columns, and before/after row counts, column lists, and dtypes.
-6. **When** the buffer exceeds 20 entries, **then** the oldest entry is dropped.
-7. **When** an unhandled exception reaches a user-facing endpoint, **then** the top-level handler catches it, calls `diagnose()`, and returns a friendly JSON error (not a stack trace) to the user.
-8. **When** `diagnose()` classifies an error as transient or user_caused, **then** no background task is spawned.
-9. **When** `diagnose()` classifies an error as systemic, **then** a background task creates a managed agent session, sends the diagnosis, and polls until the agent completes (explores, fixes, tests, commits). Then `create_fix_pr()` opens a PR from the agent's branch.
-10. **When** `ANTHROPIC_API_KEY` is not set, **then** the entire troubleshooter pipeline is unavailable (no diagnosis, no fix generation). Unhandled exceptions still return a generic friendly message.
-11. **When** `TROUBLESHOOTER_GITHUB_TOKEN` is not set, **then** the managed agent cannot clone/push, so Phases 2-3 are skipped; diagnosis is logged to console.
-12. **When** `TROUBLESHOOTER_REPO_URL` is not set, **then** Phases 2-3 are skipped; diagnosis is logged to console.
-13. **When** fix generation or PR creation fails, **then** the pipeline logs the failure and stops — no error propagates to the user.
-14. **When** a user sends a message to `POST /api/bug-report`, **then** a `DiagnosisRequest` is built with `error_type="user_reported"` and processed through the same pipeline.
-15. **When** a user sends a bug report, **then** the response is a short acknowledgment, with at most one clarifying question.
-16. **When** the user clicks the FAB on the chat screen, **then** a compact bug-report chat widget opens in the bottom-right corner.
-17. **When** the bug-report widget is open, **then** the main analysis chat remains fully interactive with no layout shift.
-18. **When** a systemic bug produces a PR, **then** the PR body contains: diagnosis (classification, root cause, evidence), reproduction steps, fix description, and files changed. The PR is never auto-merged.
-19. **When** the managed agent produces code, **then** the fix follows brownfield harness conventions: explicit types, verbose comments with cross-references, error handling contracts documented, and greppable names. Regression tests match existing test file patterns and conventions. This is enforced via the agent's system prompt, which includes the relevant harness principles.
-
----
-
-## 5. Invariants to preserve
-
-These behaviors must NOT change. Characterization tests will be written for any that lack coverage.
-
-### API contracts
-- `POST /api/upload` — request shape (multipart file + optional form fields), response shape (session_id, datasets metadata, summary), status codes (200, 400, 422).
-- `POST /api/chat` — request shape (session_id, question, history), SSE response format (event types: chunk, metadata, error, done), status codes.
-- `POST /api/clean` — request shape (session_id, action, column, dataset_name), response shape (updated metadata), status codes (200, 400, 404).
-- `POST /api/clean/reset` — request/response shape, status codes.
-- `POST /api/ml-step` — request shape, SSE response format, status codes.
-- `GET /api/export/{session_id}` — response shape (.ipynb JSON), status codes.
-- `GET /api/models` — response shape, status codes.
-- `POST /api/validate-key` — request/response shape, status codes.
-- `GET /api/health` — response shape.
-
-### Error handling contracts
-- Explicit 400 responses for invalid input (bad file type, empty file, oversized file, invalid action, missing session fields) must continue to return 400, not be swallowed by the top-level handler.
-- Explicit 404 responses for missing sessions must continue to return 404.
-- SSE error events in `/api/chat` and `/api/ml-step` must continue to stream error details to the client.
-- The top-level exception handler must only catch exceptions that currently produce unhandled 500s — it must not intercept any currently-handled error path.
-
-### Session behavior
+**What must NOT break:**
 - `SessionStore.create()` always succeeds and returns a valid session_id.
 - `SessionStore.get()` returns `None` for unknown IDs (never raises).
 - `SessionStore.delete()` returns `False` for unknown IDs (never raises).
-- DataFrame isolation: working copies and originals are independent; mutations to one don't affect the other.
-- `exec_namespace` is populated with sandbox libraries + `dfs` dict + `print`.
-
-### LLM call behavior
-- `call_llm_chat()` and `call_llm()` continue to call the correct provider SDK based on the `provider` argument.
-- `parse_chat_response()` continues to return the same structured dict on success and the same error string on failure.
-- Retry logic in `_attempt_chat_with_retries` continues to retry up to `MAX_CHAT_RETRIES` times.
-- `generate_summary()` continues to work independently of the chat flow.
-
-### Code execution behavior
-- `execute_code()` continues to run code in a subprocess with timeout enforcement.
-- Blocked builtins (`__import__`, `open`, `eval`, `exec`, `compile`, `globals`, `locals`) remain blocked.
-- Figure capture, stdout capture, and DataFrame change detection continue to work.
-
-### Data cleaning behavior
-- Pure functions in `clean.py` (`drop_duplicates`, `fill_median`, `drop_missing_rows`) continue to produce the same transformations.
-- `VALID_ACTIONS` set is unchanged.
-
-### Frontend behavior
-- The existing ChatPanel component renders and behaves identically — message display, input submission, SSE streaming, data summary, cleaning suggestion cards, ML wizard, code blocks, chart images.
-- Header bar buttons (Reset, Build a Model, Export) remain functional.
-- No layout shift or reflow of the existing UI when the bug-report widget is closed.
+- DataFrame isolation: working copies and originals are independent.
+- `exec_namespace` populated with sandbox libraries + `dfs` dict + `print`.
 
 ---
 
-## 6. Out of scope
+## Area 2: Instrumentation at System Boundaries
 
-- **Persistent log storage** — context buffer is in-memory, session-scoped. No database, no file logging.
-- **Log aggregation / search** (ELK, Loki) — single-user prototype.
-- **Metrics / dashboards** (Prometheus, Grafana) — YAGNI.
-- **Distributed tracing** (OpenTelemetry, Jaeger) — monolith.
-- **Alerting / paging** — one user, running locally.
-- **Auto-merging of troubleshooter PRs** — PRs require developer review.
-- **Multi-turn bug-report interrogation** — one clarifying question max, then acknowledge.
-- **Cross-session aggregation** — each session is independent.
-- **Redesign of the existing analysis chat** — the ChatPanel component is not modified.
-- **Bug-report chat history persistence** — bug chat is session-scoped like everything else.
+Four boundaries instrumented because they're where non-determinism enters the system. Instrumentation happens at call sites in route handlers, NOT inside lower-level modules (`llm.py`, `executor.py`, `clean.py` stay unchanged). All buffer writes are fire-and-forget side effects wrapped defensively — a failure must never crash the endpoint.
+
+### 2a: LLM Calls
+
+**What exists today:** `call_llm_chat()` in `llm.py` calls Anthropic/OpenAI APIs. Called from `/api/chat` and `/api/ml-step`. Only `logger.info`/`logger.warning`. No structured capture.
+
+**What changes:** After each `call_llm_chat()`, a `ContextEntry` with `operation="llm_call"` is appended. Metadata: model, purpose, parse success, parsed code, token usage.
+
+**Acceptance criteria:** When an LLM call completes (success or failure), a `ContextEntry` is appended with the user's question as `input_actual`, raw LLM response as `output_actual`, and all metadata fields.
+
+**What must NOT break:** `call_llm_chat()`/`call_llm()` provider dispatch. `parse_chat_response()` return shapes. Retry logic in `_attempt_chat_with_retries`. `generate_summary()` independence.
+
+### 2b: Code Execution
+
+**What exists today:** `execute_code()` in `executor.py` runs code in subprocess sandbox. Returns `{stdout, figures, error, dataframe_changed, new_dfs_pickle}`. No logging.
+
+**What changes:** After each `execute_code()`, a `ContextEntry` with `operation="code_execution"` is appended. Metadata: namespace keys, figure count, execution time, DataFrame change status.
+
+**Acceptance criteria:** When code is executed, a `ContextEntry` is appended with full code as `input_actual`, stdout/error as `output_actual`, and all metadata.
+
+**What must NOT break:** Subprocess execution with timeout. Blocked builtins. Figure/stdout capture. DataFrame change detection.
+
+### 2c: File Parsing
+
+**What exists today:** `parse_dataframes_from_bytes()` in `main.py` parses CSV/Excel into DataFrames. Failures return 400. No capture of results.
+
+**What changes:** After successful parsing in `/api/upload`, a `ContextEntry` with `operation="file_parse"` is appended. Metadata: resulting shape, columns with dtypes, missing value counts.
+
+**Acceptance criteria:** When a file is parsed, a `ContextEntry` is appended with filename as `input_actual` and parse results as `output_actual`.
+
+**What must NOT break:** `/api/upload` request/response shapes. Status codes (200, 400, 422).
+
+### 2d: Data Cleaning
+
+**What exists today:** `apply_cleaning_action()` in `clean.py` dispatches to pure functions. `logger.info()` at endpoint level. No before/after capture.
+
+**What changes:** Around each `apply_cleaning_action()` in `/api/clean`, a `ContextEntry` with `operation="data_clean"` is appended. Metadata: action, target columns, before/after row counts, column lists, dtypes.
+
+**Acceptance criteria:** When a cleaning action is applied, a `ContextEntry` is appended with action as `input_actual` and before/after summary as `output_actual`.
+
+**What must NOT break:** Pure functions produce same transformations. `VALID_ACTIONS` unchanged. `/api/clean` and `/api/clean/reset` request/response shapes and status codes.
+
+---
+
+## Area 3: Exception Handler + Diagnosis
+
+**What exists today:** Endpoints catch expected errors (missing session → 404, invalid input → 400). No top-level exception handler — unhandled exceptions produce FastAPI's default 500 with stack trace. LLM errors in `/api/chat` caught and streamed as SSE error events. Two SSE streaming endpoints (`/api/chat`, `/api/ml-step`) use `StreamingResponse` with generators.
+
+**What changes:**
+- FastAPI `@app.exception_handler(Exception)` catches unhandled exceptions from non-streaming endpoints. Builds `DiagnosisRequest`, calls `diagnose()`, returns friendly JSON error.
+- For SSE streaming endpoints: try/except inside generators catches uncaught exceptions, yields SSE error event, writes buffer entry, triggers troubleshooter.
+- `DiagnosisRequest` and `Diagnosis` dataclasses in `backend/troubleshooter.py`.
+- `diagnose()` in `troubleshooter.py` (not `llm.py` — serves observability pipeline, not user's analysis). Calls `call_llm_chat()` for API transport.
+- Classifies: transient / user_caused / systemic. For systemic: returns friendly message immediately, spawns background task.
+- No API key available → generic friendly message without LLM classification.
+
+**Acceptance criteria:**
+- Unhandled exceptions return friendly JSON error, not stack trace.
+- Transient/user_caused → no background task.
+- No API key → generic friendly message still returned.
+
+**What must NOT break:**
+- Explicit 400s for invalid input continue to return 400.
+- Explicit 404s for missing sessions continue to return 404.
+- SSE error events in `/api/chat` and `/api/ml-step` continue streaming.
+- Handler only catches currently-unhandled 500s — no interception of handled error paths.
+- All 9 endpoint request/response contracts unchanged.
+
+---
+
+## Area 4: Managed Agent + PR Creation
+
+**What exists today:** No GitHub integration. No agent infrastructure.
+
+**What changes:**
+- At startup: managed agent via `client.beta.agents.create()` with brownfield harness system prompt. Cloud environment via `client.beta.environments.create()` with pytest and networking.
+- `invoke_fix_agent()` creates session, sends diagnosis, polls for completion. Agent clones repo, explores, fixes, tests, commits, pushes.
+- `create_fix_pr()` uses PyGithub to open PR from agent's branch.
+- `handle_systemic_error()` orchestrates: diagnose → agent → PR.
+- Graceful degradation at each step: missing key → skip; failure → log and stop.
+
+**Acceptance criteria:**
+- Systemic classification → background task → agent session → PR.
+- PR body: diagnosis, reproduction steps, fix description, files changed. Never auto-merged.
+- Agent code follows harness conventions (enforced via system prompt).
+- Missing `ANTHROPIC_API_KEY` → pipeline unavailable.
+- Missing `TROUBLESHOOTER_GITHUB_TOKEN` or `TROUBLESHOOTER_REPO_URL` → Phases 2-3 skipped.
+- Failures logged, never propagated to user.
+
+**What must NOT break:** Nothing (new infrastructure). But background task must never affect the user's request.
+
+---
+
+## Area 5: Bug-Report Endpoint
+
+**What exists today:** No bug-report mechanism.
+
+**What changes:**
+- `POST /api/bug-report` accepts `{session_id, message}`.
+- Builds `DiagnosisRequest` with `error_type="user_reported"`, feeds into same pipeline.
+- Returns short acknowledgment + at most one clarifying question.
+
+**Acceptance criteria:**
+- Bug report builds `DiagnosisRequest` with `error_type="user_reported"` and processes through pipeline.
+- Response is short acknowledgment with at most one clarifying question.
+
+**What must NOT break:** Nothing (new endpoint). Must not interfere with existing routing.
+
+---
+
+## Area 6: Frontend Widget
+
+**What exists today:** Single-screen chat (`ChatPanel`) with header, scrollable messages, input bar. Z-index: 1100 (help trigger), 1200 (help overlay), 1300 (help panel). No bug-report UI.
+
+**What changes:**
+- `BugReportWidget.tsx` — circular FAB (~40px), bottom-right, above input bar. Opens compact chat (~340x380px).
+- Widget has own header, scrollable messages, text input. Sends to `POST /api/bug-report`.
+- `api.ts` gains `submitBugReport()` using existing `apiFetch()`.
+- `App.tsx` renders widget as sibling of `ChatPanel`. Z-index below 1100.
+
+**Acceptance criteria:**
+- FAB click opens compact widget in bottom-right.
+- Main chat stays fully interactive with no layout shift.
+
+**What must NOT break:**
+- ChatPanel renders and behaves identically.
+- Header buttons (Reset, Build a Model, Export) functional.
+- No layout shift when widget is closed.
+- No modifications to ChatPanel, store, or existing components.
+
+---
+
+## Area 7: Dependencies & Environment
+
+**New module:** `backend/troubleshooter.py` — all dataclasses, diagnosis, agent invocation, PR creation, prompt template.
+
+**New dependency:** `PyGithub` in `requirements.txt`. Managed agent uses existing `anthropic` SDK.
+
+**New environment variables:**
+
+| Variable | Purpose | If missing |
+|----------|---------|------------|
+| `TROUBLESHOOTER_GITHUB_TOKEN` | Repo access for git push + PR | PR skipped; diagnosis logged |
+| `TROUBLESHOOTER_REPO_URL` | Repo URL for agent to clone | Phases 2-3 skipped |
+
+No separate API key — managed agent uses same `ANTHROPIC_API_KEY`.
+
+---
+
+## Out of Scope
+
+- Persistent log storage — buffer is in-memory, session-scoped
+- Log aggregation (ELK, Loki) — single-user prototype
+- Metrics/dashboards (Prometheus, Grafana) — YAGNI
+- Distributed tracing (OpenTelemetry) — monolith
+- Alerting/paging — one user, running locally
+- Auto-merging troubleshooter PRs — require developer review
+- Multi-turn bug-report interrogation — one question max
+- Cross-session aggregation — sessions are independent
+- Redesign of analysis chat — ChatPanel not modified
+- Bug-report history persistence — session-scoped
