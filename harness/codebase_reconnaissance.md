@@ -98,7 +98,9 @@ For each affected area, assess:
 
 ## Reconnaissance Output
 
-Present the reconnaissance findings to the user as part of the execution plan (see `harness/execution_plan_principles.md` § "What the Execution Plan Contains" → "Current state"). For brownfield changes, the "Current state" section of the execution plan should contain:
+Produce a **reconnaissance document** as a branch-scoped artifact (e.g., `planning/recon-<short-description>.md`). This document is committed to the branch during development and removed upon merge to main — same lifecycle as the change spec (see `harness/execution_plan_principles.md` § "Artifact lifecycle" and `harness/change_analysis_principles.md` § "Artifact Lifecycle").
+
+The reconnaissance document should contain:
 
 1. **Affected files and functions** — list with one-line descriptions
 2. **Dependency map** — who calls what, in both directions
@@ -106,4 +108,4 @@ Present the reconnaissance findings to the user as part of the execution plan (s
 4. **Blast radius classification** — contained / interface / cross-cutting
 5. **Key risks** — the 2–3 things most likely to go wrong
 
-This feeds directly into sequencing decisions in the brownfield execution phases.
+Present the findings to the user for confirmation. This feeds directly into sequencing decisions in the brownfield execution phases.

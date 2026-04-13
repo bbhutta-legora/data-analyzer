@@ -21,7 +21,7 @@ Skip for trivial changes where scope is self-evident (typo fix, config value upd
 
 The change spec is a **branch-scoped artifact**. Create it as a file in the branch (e.g., `planning/change-spec-<short-description>.md`). It serves as context for the session and as a record of intent during the branch's lifetime.
 
-**Clean it out when merging to main.** The change spec is working documentation, not permanent project history. The commit messages and PR description carry the "why" into main; the change spec's job is done.
+**Clean it out when merging to main.** The change spec is working documentation, not permanent project history. The commit messages and PR description carry the "why" into main; the change spec's job is done. See also `harness/execution_plan_principles.md` § "Artifact lifecycle" for the shared lifecycle of all brownfield artifacts.
 
 ---
 
