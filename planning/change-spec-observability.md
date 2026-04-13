@@ -103,7 +103,8 @@ The trigger is the observability strategy document itself — this is the implem
 - Contains all dataclasses: `ContextEntry`, `DiagnosisRequest`, `Diagnosis`, `ProposedFix`, `FileDiff`, `RegressionTest`.
 - Diagnosis prompt template lives as a constant at the top of this file (per coding principle: "Keep all LLM prompts in `llm.py` or as constants at the top of the file where they're used").
 - Calls `call_llm_chat()` from `llm.py` for LLM API transport — `llm.py` provides the shared infrastructure, `troubleshooter.py` owns the prompts and logic.
-- `generate_fix()` reads source files from disk, makes LLM call(s) to produce diffs and regression tests.
+- `generate_fix()` is an **agent loop**, not a single LLM call. It needs to: read source files identified from the diagnosis/traceback, understand the surrounding code context, generate a fix, generate a regression test that matches existing test conventions, and validate coherence between the fix and the test. This is a multi-step reasoning process that may require multiple LLM calls with tool-use (file reading) in between.
+- The fix-generation agent follows the **brownfield coding guidelines from the harness**: it considers invariants (what must not change), produces fixes consistent with `harness/coding_principles.md` (explicit types, greppable names, verbose comments, error handling contracts), and generates regression tests consistent with `harness/TEST-STRATEGY.md` patterns. The agent's system prompt includes the relevant harness principles so generated PRs match codebase conventions rather than producing generic "AI fixes" that developers must mentally translate.
 - `create_fix_pr()` uses PyGithub to create branch, commit changes, and open PR.
 - `handle_systemic_error()` orchestrates the background pipeline.
 
@@ -122,7 +123,7 @@ The trigger is the observability strategy document itself — this is the implem
 6. **When** the buffer exceeds 20 entries, **then** the oldest entry is dropped.
 7. **When** an unhandled exception reaches a user-facing endpoint, **then** the top-level handler catches it, calls `diagnose()`, and returns a friendly JSON error (not a stack trace) to the user.
 8. **When** `diagnose()` classifies an error as transient or user_caused, **then** no background task is spawned.
-9. **When** `diagnose()` classifies an error as systemic, **then** a background task calls `generate_fix()` and `create_fix_pr()`.
+9. **When** `diagnose()` classifies an error as systemic, **then** a background task runs the fix-generation agent (multi-step: read source → generate fix → generate regression test) and then calls `create_fix_pr()`.
 10. **When** `TROUBLESHOOTER_LLM_API_KEY` is not set, **then** Phase 1 uses the user's BYOK key for diagnosis; Phases 2-3 are skipped; diagnosis is logged to console.
 11. **When** `TROUBLESHOOTER_GITHUB_TOKEN` is not set, **then** Phases 1-2 run normally; Phase 3 is skipped; diagnosis + proposed fix are logged to console.
 12. **When** fix generation or PR creation fails, **then** the pipeline logs the failure and stops — no error propagates to the user.
@@ -131,6 +132,7 @@ The trigger is the observability strategy document itself — this is the implem
 15. **When** the user clicks the FAB on the chat screen, **then** a compact bug-report chat widget opens in the bottom-right corner.
 16. **When** the bug-report widget is open, **then** the main analysis chat remains fully interactive with no layout shift.
 17. **When** a systemic bug produces a PR, **then** the PR body contains: diagnosis (classification, root cause, evidence), reproduction steps, fix description, and files changed. The PR is never auto-merged.
+18. **When** the fix-generation agent produces code, **then** the fix follows brownfield harness conventions: explicit types, verbose comments with cross-references, error handling contracts documented, and greppable names. Regression tests match existing test file patterns and conventions.
 
 ---
 
