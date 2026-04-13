@@ -73,9 +73,10 @@ The trigger is the observability strategy document itself — this is the implem
 - **Data cleaning**: Every `apply_cleaning_action()` call creates a context entry with the action, target columns, and before/after row counts, column lists, and dtypes.
 
 ### Bug-catching Path 1: System-detected errors
-- A top-level FastAPI exception handler catches any unhandled exception from any endpoint.
+- A top-level FastAPI exception handler catches **any unhandled exception from any endpoint** — regardless of whether the error originated at an instrumented boundary (LLM call, code execution) or in our own deterministic code (a wrong `.get()` call, an `AttributeError` from an unexpected data shape, an `IndexError` in a list comprehension). The boundary instruments feed evidence into the buffer; the top-level handler is the trigger that fires on any unhandled error.
 - It builds a `DiagnosisRequest` (error details + context buffer + conversation history + current DataFrame metadata + ML state) and calls `diagnose()`.
-- `diagnose()` is an LLM call in `llm.py` that classifies the error (transient / user_caused / systemic) and returns a `Diagnosis`.
+- `diagnose()` lives in `troubleshooter.py` (not `llm.py` — it serves the observability pipeline, not the user's analysis session). It calls `call_llm_chat()` from `llm.py` for the actual API transport, but prompt construction, classification logic, and the `DiagnosisRequest`/`Diagnosis` dataclasses all belong to the troubleshooter module.
+- `diagnose()` classifies the error (transient / user_caused / systemic) and returns a `Diagnosis`.
 - For transient/user_caused: returns a friendly user-facing message. Done.
 - For systemic: returns the friendly message to the user immediately, then spawns a background task.
 - Background task calls `generate_fix()` in `troubleshooter.py` → reads source files, generates diffs + optional regression test via LLM.
@@ -97,7 +98,11 @@ The trigger is the observability strategy document itself — this is the implem
 - Widget is a separate React component tree; it does not modify the existing ChatPanel.
 
 ### New module: `backend/troubleshooter.py`
-- Contains `generate_fix()` and `create_fix_pr()`.
+- Owns the entire observability pipeline: diagnosis, fix generation, and PR creation.
+- Contains `diagnose()`, `generate_fix()`, `create_fix_pr()`, and `handle_systemic_error()`.
+- Contains all dataclasses: `ContextEntry`, `DiagnosisRequest`, `Diagnosis`, `ProposedFix`, `FileDiff`, `RegressionTest`.
+- Diagnosis prompt template lives as a constant at the top of this file (per coding principle: "Keep all LLM prompts in `llm.py` or as constants at the top of the file where they're used").
+- Calls `call_llm_chat()` from `llm.py` for LLM API transport — `llm.py` provides the shared infrastructure, `troubleshooter.py` owns the prompts and logic.
 - `generate_fix()` reads source files from disk, makes LLM call(s) to produce diffs and regression tests.
 - `create_fix_pr()` uses PyGithub to create branch, commit changes, and open PR.
 - `handle_systemic_error()` orchestrates the background pipeline.
