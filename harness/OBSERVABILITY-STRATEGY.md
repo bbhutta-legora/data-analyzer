@@ -33,7 +33,7 @@ The infrastructure that makes this possible is a lightweight **context buffer** 
 
 5. **Session-scoped, not global.** Each session maintains its own context buffer. No cross-session aggregation, no central log store, no persistent infrastructure. The unit of bug-catching is one user's conversation.
 
-6. **Instrument boundaries, not internals.** Capture context at the points where the system interacts with something non-deterministic or external: LLM calls, sandboxed code execution, file parsing. Don't instrument pure functions or internal data transformations — those are covered by tests.
+6. **Instrument boundaries first, but catch everything.** The context buffer captures entries at system boundaries (LLM calls, code execution, file parsing) because that's where the most useful diagnostic context lives. But the troubleshooter itself activates on *any* unhandled exception — including bugs in our own deterministic code. The buffer gives the troubleshooter context about what led up to the error; the top-level exception handler ensures no error type is invisible.
 
 ---
 
@@ -152,16 +152,22 @@ Cleaning steps transform the working dataframe. Capture what changed so the trou
 
 ### When it activates
 
-The troubleshooter activates automatically when an error reaches a **user-facing boundary** — an API endpoint that would return an error response to the frontend. It does NOT activate for:
+The troubleshooter activates automatically when **any unhandled exception reaches a user-facing endpoint** — regardless of whether the error originated at a system boundary (LLM call, file parse) or inside our own deterministic code (a `.get()` on a list instead of a dict, an `AttributeError` from an unexpected data shape, a `StopIteration` from an empty collection).
+
+Tests can't cover every input combination. Code that's "deterministic" can still be wrong for inputs we didn't anticipate. The troubleshooter catches what tests miss.
+
+It does NOT activate for:
 
 - Handled retries (e.g., LLM call fails, retry succeeds — no need to diagnose)
 - Validation errors with obvious causes (e.g., "no file uploaded" — the user knows what happened)
-- Expected edge cases already covered by explicit error messages
+- Expected edge cases already covered by explicit error messages (e.g., "session not found" 404s)
 
-**Activation points:**
-- `main.py` route handlers, in the `except` block before returning an error response
-- After LLM response parsing fails and exhausts retries
-- After sandboxed code execution fails with an error the user can't self-diagnose
+**Implementation:** A top-level exception handler (FastAPI exception handler or middleware) catches any unhandled exception that would otherwise produce a 500. It passes the error and the session's context buffer to the troubleshooter before returning a friendly error to the user. Individual `except` blocks in route handlers still handle expected errors (missing session, invalid input) — the top-level handler catches everything else.
+
+**Activation points (in priority order):**
+1. **Top-level exception handler** — catches any unhandled exception from any endpoint. This is the safety net that ensures nothing slips through.
+2. **After LLM retries exhausted** — the retry loop in `_attempt_chat_with_retries` gives up and the error is about to be streamed to the user.
+3. **After sandboxed code execution fails** — the executor returns an error that the user can't self-diagnose.
 
 ### What it receives
 
@@ -187,13 +193,14 @@ class DiagnosisRequest:
 
 Not every runtime error is a code bug. The troubleshooter's first job is to classify the error before deciding what to do:
 
-| Classification | Meaning | Action |
-|---------------|---------|--------|
-| **Transient** | Temporary external failure — rate limit, network timeout, LLM refusal on one specific input | Retry or return a user-friendly message. No PR. No developer action needed. |
-| **User-caused** | The user's input or data triggered a predictable edge case — empty dataset, unsupported file format, ambiguous question | Return a helpful error message guiding the user. No PR. No developer action needed. |
-| **Systemic** | A flaw in our code that would reproduce for other users with similar inputs — bad prompt construction, missing validation, incorrect parsing logic | Diagnose, generate a fix, open a PR for developer review. |
+| Classification | Meaning | Example | Action |
+|---------------|---------|---------|--------|
+| **Transient** | Temporary external failure | Rate limit, network timeout, LLM refusal on one specific input | Retry or return a user-friendly message. No PR. |
+| **User-caused** | The user's input or data triggered a predictable edge case | Empty dataset, unsupported file format, ambiguous question | Return a helpful error message guiding the user. No PR. |
+| **Systemic (boundary)** | A flaw in how we interact with external systems | Bad prompt construction that causes the LLM to hallucinate column names, missing JSON parse validation | Diagnose, generate a fix, open a PR. |
+| **Systemic (internal)** | A bug in our own deterministic code that tests didn't catch | `AttributeError` because `parse_chat_response` calls `.get()` on a list, `StopIteration` from an empty dataframe dict | Diagnose, generate a fix, open a PR. These are high-confidence bugs — our code is unambiguously wrong. |
 
-Only **systemic** errors produce a PR. The troubleshooter must include its classification and reasoning — a developer reviewing the PR should be able to see why the troubleshooter considered this a code-level bug rather than a transient or user-caused issue.
+Both **systemic** classifications produce a PR. The distinction matters for the diagnosis: boundary bugs need prompt or integration fixes; internal bugs need code fixes and probably a new test case to prevent regression. The troubleshooter must include its classification and reasoning — a developer reviewing the PR should be able to see why the troubleshooter considered this a code-level bug rather than a transient or user-caused issue.
 
 ### What it produces
 
